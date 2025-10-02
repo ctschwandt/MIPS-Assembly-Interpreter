@@ -1,4 +1,4 @@
-# MIPS Assembly Interpreter
+# MIPS Assembly Interpreter (in progress)
 
 A C++ interpreter for the MIPS assembly language.
 
