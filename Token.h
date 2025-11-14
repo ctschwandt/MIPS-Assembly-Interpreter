@@ -5,50 +5,155 @@
 #define TOKEN_H
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <string>
+#include <iomanip>
 
-#include "Constants.h"
-
-struct StrPos
+enum TokenType
 {
-    uint32_t start;
-    uint32_t end;
+    IDENTIFIER,  // mnemonics, labels, directives (add, LOOP, .word)
+    REGISTER,    // register ($t0, $sp, $0)
+    INT,         // immediates (42, -7, 0x10010000)
+    STRING,      // string literal for .ascii/.asciiz ("Hello, world!")
+    COMMA,       // ,
+    LPAREN,      // (
+    RPAREN,      // )
+    COLON,       // :
+    ERROR,       // invalid char (&&&&, **^*)
+    EOL          // end of line marker
 };
 
-struct TokenReference
+class Token
 {
-    TokenType type; // which side table to index
-    uint32_t idx;   // index into the side table
-    uint16_t line;  // line number in program
-    uint16_t col;   // column number in program
-};
+public:
+    Token(TokenType t, uint32_t lin, uint32_t p, uint32_t le)
+        : type(t), line(lin), pos(p), len(le)
+    {}
 
-struct TokenTables
-{
-    // token sequence
-    std::vector< TokenReference > stream;
-
-    // side tables
-    std::vector< Instruction > instrs;   // Instruction enum values (fits in uint8_t)
-    std::vector< Register > regs;     // Register enum values  (0..31)
-    std::vector< int32_t > ints;     // parsed immediates (sign-extended)
-    std::vector< Punctuation > puncts;   // Punctuation enum values
-    std::vector< Directive > dirs;     // Directive enum values
-    std::vector< StrPos > labels;   // label names, symbols (slices into source)
-    std::vector< StrPos > strings;  // .ascii/.asciiz slices (without surrounding quotes)
+    std::string get_string(const std::string & s) const
+    {
+        return s.substr(pos, len);
+    }
+    
+    TokenType type;
+    uint32_t line; // line number (might be better to do std::vector< std::vector< Token > >)
+    uint32_t pos; // byte offset in the line
+    uint32_t len; // length in bytes
 };
 
 //==============================================================
-// Emit helpers
+// Printing
 //==============================================================
-void emit_ins(TokenTables &, Instruction, uint16_t ln, uint16_t col);
-void emit_reg(TokenTables &, Register, uint16_t ln, uint16_t col);
-void emit_int(TokenTables &, int32_t, uint16_t ln, uint16_t col);
-void emit_punct(TokenTables &, Punctuation, uint16_t ln, uint16_t col);
-void emit_dir(TokenTables &, Directive, uint16_t ln, uint16_t col);
-void emit_label(TokenTables &, StrPos, uint16_t ln, uint16_t col);
-void emit_string(TokenTables &, StrPos, uint16_t ln, uint16_t col);
-void emit_eol(TokenTables &, uint16_t ln, uint16_t col);
+inline
+const char * token_type_cstr(TokenType t)
+{
+    switch (t)
+    {
+        case IDENTIFIER: return "IDENTIFIER";
+        case REGISTER:   return "REGISTER";
+        case INT:        return "INT";
+        case STRING:     return "STRING";
+        case COMMA:      return "COMMA";
+        case LPAREN:     return "LPAREN";
+        case RPAREN:     return "RPAREN";
+        case COLON:      return "COLON";
+        case ERROR:      return "ERROR";
+        case EOL:        return "EOL";
+    }
+    return "UNKNOWN";
+}
+
+inline
+void println_toks(const std::vector< Token> & toks)
+{
+    std::cout << '{';
+    std::string delim = "";
+    for (const auto & tok : toks)
+    {
+        std::cout << delim << token_type_cstr(tok.type);
+        delim = ", ";
+    }
+    std::cout << '}';
+    std::cout << std::endl;
+}
+
+inline
+void println_toks_detail(const std::vector<Token> & toks,
+                         const std::string & line)
+{
+    std::cout << "Tokens (" << toks.size() << "):\n";
+
+    if (toks.empty())
+    {
+        std::cout << "(no tokens)\n\n";
+        return;
+    }
+
+    //--------------------------------------------------
+    // first pass: compute column widths
+    //--------------------------------------------------
+    std::size_t idx_width  = 0;
+    std::size_t type_width = 0;
+    std::size_t line_width = 0;
+    std::size_t pos_width  = 0;
+    std::size_t len_width  = 0;
+
+    auto digits = [](std::size_t x) -> std::size_t
+    {
+        std::size_t d = 1;
+        while (x >= 10) { x /= 10; ++d; }
+        return d;
+    };
+
+    idx_width = digits(toks.size() - 1);
+
+    for (const auto & tok : toks)
+    {
+        // token type string length
+        const char * tstr = token_type_cstr(tok.type);
+        type_width = std::max(type_width, std::strlen(tstr));
+
+        // numeric fields
+        line_width = std::max< std::size_t >(line_width, digits(tok.line));
+        pos_width  = std::max< std::size_t >(pos_width,  digits(tok.pos));
+        len_width  = std::max< std::size_t >(len_width,  digits(tok.len));
+    }
+
+    //--------------------------------------------------
+    // second pass: print aligned
+    //--------------------------------------------------
+    for (std::size_t i = 0; i < toks.size(); ++i)
+    {
+        const Token & tok = toks[i];
+
+        std::string lexeme;
+        if (tok.pos + tok.len <= line.size())
+        {
+            lexeme = line.substr(tok.pos, tok.len);
+        }
+        else
+        {
+            lexeme = "<out-of-range>";
+        }
+
+        std::cout << "  ["
+                  << std::setw(idx_width) << i
+                  << "]  ";
+
+        // type: left-aligned
+        std::cout << std::left  << std::setw(type_width) << token_type_cstr(tok.type)
+                  << "  ";
+
+        // restore right alignment for numbers
+        std::cout << std::right
+                  << "line=" << std::setw(line_width) << tok.line << "  "
+                  << "pos="  << std::setw(pos_width)  << tok.pos  << "  "
+                  << "len="  << std::setw(len_width)  << tok.len  << "  "
+                  << "text=\"" << lexeme << "\"\n";
+    }
+
+    std::cout << '\n';
+}
 
 #endif

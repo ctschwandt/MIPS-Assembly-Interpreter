@@ -1,7 +1,4 @@
-do:
-	g++ *.cpp; ./a.out
-
-c compile:
+e exe:
 	g++ *.cpp
 
 r run:

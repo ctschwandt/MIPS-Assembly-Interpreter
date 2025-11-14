@@ -4,89 +4,41 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-//==============================================================
-// Token Types
-//==============================================================
-enum TokenType
+// 6-bit opcodes (bits 31..26)
+enum Opcode : uint8_t
 {
-    INS,    // instruction mnemonic (add, lw, j, ...)
-    REG,    // register ($t0, $sp, ...)
-    INT,    // immediate / integer literal (42, -7, 0x10010000, ...)
-    PUN,    // punctuation (',', '(', ')', ':', '.')
-    LAB,    // label identifiers (foo:)
-    DIR,    // assembler directives (.data, .word, etc)
-    STR,    // string literal (for .ascii/.asciiz)
-    EOL     // end-of-line marker
+    OP_RTYPE = 0x00,  // SPECIAL (R-type)
+
+    OP_J     = 0x02,  // j
+    OP_JAL   = 0x03,  // jal
+
+    OP_BEQ   = 0x04,  // beq
+    OP_BNE   = 0x05,  // bne
+
+    OP_ADDI  = 0x08,  // addi
+    OP_SLTI  = 0x0A,  // slti
+    OP_ANDI  = 0x0C,  // andi
+    OP_ORI   = 0x0D,  // ori
+
+    OP_LB    = 0x20,  // lb
+    OP_LW    = 0x23,  // lw
+    OP_SB    = 0x28,  // sb
+    OP_SW    = 0x2B   // sw
 };
 
-//==============================================================
-// Instructions
-//==============================================================
-enum Instruction
+// 6-bit funct codes (bits 5..0) for R-type (opcode = 0)
+enum Funct : uint8_t
 {
-    ADD, ADDU, SUB, SUBU,
-    MULT, MULTU, DIV, DIVU,
-    AND, OR, XOR, NOR,
-    SLT, SLTU,
+    FUNCT_NONE = 0x00, // for non-r-type
+    FUNCT_SLL = 0x00, // 000000b
+    FUNCT_SRL = 0x02, // 000010b
+    FUNCT_SRA = 0x03, // 000011b
 
-    ADDI, ADDIU, ANDI, ORI, XORI,
-    LUI, LW, SW, LB, LBU, SB, LH, LHU, SH,
-
-    BEQ, BNE, BGTZ, BLEZ, BLTZ, BGEZ,
-    J, JAL, JR, JALR,
-
-    MFHI, MFLO, MTHI, MTLO,
-    SLL, SRL, SRA, SLLV, SRLV, SRAV,
-
-    SYSCALL,
-
-    // pseudoinstructions
-    MOVE, LA, LI
-};
-
-//==============================================================
-// Registers
-//==============================================================
-enum Register
-{
-    ZERO,        // $zero
-    AT   = 1,    // assembler temporary
-    V0   = 2, V1,        // function results
-    A0   = 4, A1, A2, A3,  // arguments
-    T0   = 8, T1, T2, T3, T4, T5, T6, T7, // temporaries
-    S0   = 16, S1, S2, S3, S4, S5, S6, S7, // saved
-    T8   = 24, T9,       // more temporaries
-    K0   = 26, K1,       // reserved for OS
-    GP   = 28,             // global pointer
-    SP   = 29,             // stack pointer
-    FP   = 30,             // frame pointer
-    RA   = 31              // return address
-};
-
-//==============================================================
-// Punctuation
-//==============================================================
-enum Punctuation
-{
-    COMMA,    // ,
-    LPAREN,   // (
-    RPAREN,   // )
-    COLON,    // :
-    DOT,      // .
-    UNKNOWN
-};
-// shld $ also be added in here?
-
-//==============================================================
-// Directives
-//==============================================================
-enum Directive
-{
-    TEXT,     // .text
-    DATA,     // .data
-    WORD,     // .word
-    ASCIIZ,   // .asciiz
-    ASCII     // .ascii
+    FUNCT_ADD = 0x20, // 100000b
+    FUNCT_SUB = 0x22, // 100010b
+    FUNCT_AND = 0x24, // 100100b
+    FUNCT_OR  = 0x25, // 100101b
+    FUNCT_SLT = 0x2A  // 101010b
 };
 
 #endif

@@ -9,73 +9,88 @@
 #include <unordered_map>
 
 #include "Token.h"
-#include "Constants.h"
 
+//============================c==================================
+// Helpers
 //==============================================================
-// Exceptions (inline "structors" in header)
-//==============================================================
-class LexerError
+inline
+bool is_alpha(char c)
 {
-public:
-    LexerError(std::string msg, uint16_t line, uint16_t col)
-        : msg_(msg), line_(line), col_(col) {}
+    return (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'));
+}
 
-    virtual ~LexerError() {}
-
-    const std::string & message() const { return msg_; }
-    uint16_t line() const { return line_; }
-    uint16_t col()  const { return col_; }
-
-private:
-    std::string msg_;
-    uint16_t    line_;
-    uint16_t    col_;
-};
-
-class UnknownRegister : public LexerError
+inline
+bool is_num(char c)
 {
-public:
-    UnknownRegister(const std::string & name, uint16_t line, uint16_t col)
-        : LexerError(std::string("unknown register: ") + name, line, col) {}
-};
+    return ('0' <= c && c <= '9');
+}
 
-class UnknownDirective : public LexerError
+inline
+bool is_alphanum(char c)
 {
-public:
-    UnknownDirective(const std::string & name, uint16_t line, uint16_t col)
-        : LexerError(std::string("unknown directive: ") + name, line, col) {}
-};
+    return (is_alpha(c) || is_num(c));
+}
 
-class UnknownInstruction : public LexerError
+inline
+bool is_ident_start(char c)
 {
-public:
-    UnknownInstruction(const std::string & name, uint16_t line, uint16_t col)
-        : LexerError(std::string("unknown instruction: ") + name, line, col) {}
-};
+    return (is_alpha(c) || c == '_' || c == '.');
+}
 
-class InvalidNumber : public LexerError
+inline
+bool is_ident_char(char c)
 {
-public:
-    InvalidNumber(const std::string & lit, uint16_t line, uint16_t col)
-        : LexerError(std::string("invalid number: ") + lit, line, col) {}
-};
+    return (is_ident_start(c) || is_num(c));
+}
 
-class MissingName : public LexerError
+inline
+bool is_register_start(char c)
 {
-public:
-    MissingName(const char * what, uint16_t line, uint16_t col)
-        : LexerError(std::string("missing ") + what, line, col) {}
-};
+    return (c == '$');
+}
 
-class UnexpectedChar : public LexerError
+inline
+bool is_comment_start(char c)
 {
-public:
-    UnexpectedChar(char c, uint16_t line, uint16_t col)
-        : LexerError(std::string("unexpected char: '") + c + "'", line, col) {}
-};
+    return (c == '#');
+}
+
+inline
+bool is_whitespace(char c)
+{
+    return (c == ' ' || c == '\t' || c == '\r');
+}
+
+inline
+bool is_lowercase(char c)
+{
+    return ('a' <= c && c <= 'z');
+}
+
+inline
+char lowercase(char c)
+{
+    return (is_lowercase(c) ? c : c - 'A' + 'a'); 
+}
+
+inline
+bool is_hex_digit(char c)
+{
+    return (is_num(c) ||
+            ('a' <= c && c <= 'f') ||
+            ('A' <= c && c <= 'F'));
+}
+
+inline
+bool is_oct_digit(char c)
+{
+    return ('0' <= c && c <= '7');
+}
 
 //==============================================================
 // Class Lexer
+// Finite state machine that tokenizes line of assembly to be
+// parsed
 //==============================================================
 class Lexer
 {
@@ -83,84 +98,239 @@ public:
     Lexer()
         : state_(DEFAULT)
     {}
-    
-    enum State {
+
+    enum State
+    {
         DEFAULT,
-        REGISTER,
-        DIRECTIVE,
-        LEXEME,
-        IMMEDIATE,
-        COMMENT
+        IN_IDENT,
+        IN_REGISTER,
+        IN_INT,
+        IN_STRING,
+        IN_CHAR
     };
 
     //===== getters and setters =====//
-    State & state();
-    State state() const;
+    State & state() { return state_; }
+    State state() const { return state_; }
 
-    //====== member functions =======//
-    TokenTables lex_file(const std::string & source);
-    TokenTables lex_repl(const std::string & chunk,
-                         uint16_t & line_counter);
+    // lex a single line into tokens
+    void lex_core(std::vector< Token > & toks, const std::string & s, uint32_t line_n)
+    {
+        size_t i = 0;
+        size_t n = s.size();
 
+        auto push_tok = [&toks, line_n](TokenType ty, size_t start,
+                                size_t end, int ival=0)
+        {
+            toks.push_back(Token(ty, line_n, start, end - start));
+        };
+
+        state() = DEFAULT;
+        size_t start = 0; // start index of current lexeme
+
+        while (i < n)
+        {
+            char c = s[i];
+            switch (state())
+            {
+                case DEFAULT:
+                    if (is_whitespace(c))
+                    {
+                        ++i;
+                        break;
+                    }
+
+                    if (is_comment_start(c))
+                    {
+                        // skip rest of line
+                        i = n;
+                        state() = DEFAULT;
+                        break;
+                    }
+                    
+                    // single char punctation
+                    if (c == ',') { push_tok(COMMA, i, i+1); ++i; break; }
+                    if (c == '(') { push_tok(LPAREN, i, i+1); ++i; break; }
+                    if (c == ')') { push_tok(RPAREN, i, i+1); ++i; break; }
+                    if (c == ':') { push_tok(COLON, i, i+1); ++i; break; }
+
+                    // string literal
+                    if (c == '"')
+                    {
+                        start = i++;
+                        state() = IN_STRING;
+                        break;
+                    }
+
+                    // char literal (tokenized as int)
+                    if (c == '\'')
+                    {
+                        start = i++;
+                        state() = IN_CHAR;
+                        break;
+                    }
+
+                    if (is_register_start(c))
+                    {
+                        start = i++;
+                        state() = IN_REGISTER;
+                        break;
+                    }
+
+                    if (is_ident_start(c))
+                    {
+                        start = i++;
+                        state() = IN_IDENT;
+                        break;
+                    }
+
+                    // integer (decimal/hex/octal) with potential leading '-'
+                    if (is_num(c) || (c == '-' && i + 1 < n && is_num(s[i+1])))
+                    {
+                        start = i++;
+                        state() = IN_INT;
+                        break;
+                    }
+
+                    // invalid (ERROR) (invalids are allowed after comments though)
+                    push_tok(ERROR, i, i+1);
+                    ++i;
+                    break;
+
+                case IN_REGISTER:
+                    if (is_alphanum(s[i]))
+                    {
+                        ++i;
+                    }
+                    else
+                    {
+                        push_tok(REGISTER, start, i);
+                        state() = DEFAULT;
+                    }
+                    
+                    break;
+
+                case IN_IDENT:
+                    if (is_ident_char(s[i]))
+                    {
+                        ++i;
+                    }
+                    else
+                    {
+                        push_tok(IDENTIFIER, start, i);
+                        state() = DEFAULT;
+                    }
+                  
+                    break;
+                    
+                case IN_INT:
+                {
+                    size_t p = (s[start] == '-' ? start + 1 : start);
+               
+                    // hex: 0x0923f
+                    if (p + 1 < n && s[p] == '0' && (lowercase(s[p+1]) == 'x'))
+                    {
+                        i = p + 2;
+                        while (i < n && is_hex_digit(s[i]))
+                            ++i;
+                        push_tok(INT, start, i);
+                        state() = DEFAULT;
+                        break;
+                    }
+
+                    // octal: 0127 (note: 0 alone is fine)
+                    if (p < n && s[p] == '0')
+                    {
+                        i = p + 1;
+                        if (i < n && is_oct_digit(s[i]))
+                        {
+                            while (i < n && is_oct_digit(s[i]))
+                                ++i;
+                            push_tok(INT, start, i);
+                            state() = DEFAULT;
+                            break;
+                        }
+
+                        // else it's just 0
+                        push_tok(INT, start, i);
+                        state() = DEFAULT;
+                        break;
+                    }
+
+                    // decimal:
+                    while (i < n && is_num(s[i]))
+                        ++i;
+                    push_tok(INT, start, i);
+                    state() = DEFAULT;
+
+                    break;
+                }
+
+                case IN_CHAR:
+                    // consume body: either escape or single char
+                    if (s[i] == '\\')
+                    {
+                        i += (i + 1 < n ? 2 : 1);  // backslash + next char if present
+                    }
+                    
+                    // closing quote if present
+                    if (s[i] == '\'')
+                        ++i;
+
+                    push_tok(INT, start, i);
+                    state() = DEFAULT;
+                    break;
+                    
+                case IN_STRING:
+                    if (s[i] == '\\') // ex: \n
+                    {
+                        i += (i + 1 < n ? 2 : 1); // skip past special char
+                    }
+                    else if (s[i] != '"')
+                    {
+                        ++i;
+                    }
+                    else
+                    {
+                        ++i; // consume closing "
+                        push_tok(STRING, start, i); // [start, i) includes the quotes
+                        state() = DEFAULT;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        switch (state())
+        {
+            case IN_IDENT:
+                push_tok(IDENTIFIER, start, i);
+                break;
+            case IN_REGISTER:
+                push_tok(REGISTER, start, i);
+                break;
+            case IN_INT:
+                push_tok(INT, start, i);
+                break;
+            case IN_STRING:
+                // unterminated string: decide if I want to push or error
+                push_tok(ERROR, start, i);
+                break;
+            case IN_CHAR:
+                // unterminated char: likewise
+                push_tok(ERROR, start, i);
+                break;
+            default:
+                break;
+        }
+
+        
+    push_tok(EOL, n, n, 0);
+    }
+    
 private:
-    // persistent DFA state
     State state_;
-
-    // static lookup maps
-    static const std::unordered_map< std::string, Instruction > instr_map;
-    static const std::unordered_map< std::string, Register >    reg_map;
-    static const std::unordered_map< char, Punctuation >        punct_map;
-    static const std::unordered_map< std::string, Directive >   dir_map;
-
-    // helpers
-    char  peek(const std::string & src, uint32_t i, uint32_t n, uint32_t k = 0) const;
-    void  advance(char c, uint32_t & i, uint16_t & line, uint16_t & col) const;
-    bool  is_whitespace(char c) const;
-    bool  is_ident_start(char c) const;
-    bool  is_ident_char(char c) const;
-    bool  is_digit(char c) const;
-    void  start_token(uint16_t line, uint16_t col,
-                      uint16_t & tok_line, uint16_t & tok_col,
-                      std::string & lexeme) const;
-
-    bool         is_punctuation(char c) const;
-
-    // map getters
-    Instruction  get_instr(const std::string & name) const;
-    Register     get_reg  (const std::string & name) const;
-    Directive    get_dir  (const std::string & name) const;
-    Punctuation  get_punct(char c) const;
-
-    // state handlers
-    void handle_default(const std::string & src, uint32_t n,
-                        uint32_t & i, uint16_t & line, uint16_t & col,
-                        std::string & lexeme,
-                        uint16_t & tok_line, uint16_t & tok_col,
-                        TokenTables & toks);
-
-    void handle_comment (const std::string & src, uint32_t n,
-                         uint32_t & i, uint16_t & line, uint16_t & col);
-    void handle_register(const std::string & src, uint32_t n,
-                         uint32_t & i, uint16_t & line, uint16_t & col,
-                         std::string & lexeme, uint16_t tok_line, uint16_t tok_col,
-                         TokenTables & toks);
-    void handle_directive(const std::string & src, uint32_t n,
-                          uint32_t & i, uint16_t & line, uint16_t & col,
-                          std::string & lexeme, uint16_t tok_line, uint16_t tok_col,
-                          TokenTables & toks);
-    void handle_lexeme   (const std::string & src, uint32_t n,
-                          uint32_t & i, uint16_t & line, uint16_t & col,
-                          std::string & lexeme, uint16_t tok_line, uint16_t tok_col,
-                          TokenTables & toks);
-    void handle_immediate(const std::string & src, uint32_t n,
-                          uint32_t & i, uint16_t & line, uint16_t & col,
-                          std::string & lexeme, uint16_t tok_line, uint16_t tok_col,
-                          TokenTables & toks);
-
-    // shared core (used by file+repl)
-    TokenTables lex_core(const std::string & source,
-                         uint16_t & line_ref,
-                         bool reset_state_at_end);
 };
 
 #endif
