@@ -6,6 +6,7 @@
 #ifndef CPU_H
 #define CPU_H
 
+#include "mybitlib.h"
 #include "RegisterFile.h"
 
 class CPU
@@ -29,8 +30,9 @@ public:
                 {
                     case FUNCT_ADD:
                     {
-                        // regs[rd] = regs[rs] + regs[rt];
-                        int64_t t = regs.readS(rs) + regs.readS(rt);
+                        int64_t a = static_cast<int64_t>(regs.readS(rs));
+                        int64_t b = static_cast<int64_t>(regs.readS(rt));
+                        int64_t t = a + b;
 
                         if (t < INT32_MIN || t > INT32_MAX)
                         {
@@ -38,52 +40,79 @@ public:
                         }
                         else
                         {
-                            regs.writeS(rd, t);
+                            regs.writeS(rd, static_cast<int32_t>(t));
                         }
-
                         break;
                     }
-                
+
                     case FUNCT_SUB:
                     {
-                        // regs[rd] = regs[rs] - regs[rt];
-                        int64_t t = regs.readS(rs) - regs.readS(rt);
+                        int64_t a = static_cast<int64_t>(regs.readS(rs));
+                        int64_t b = static_cast<int64_t>(regs.readS(rt));
+                        int64_t t = a - b;
 
                         if (t < INT32_MIN || t > INT32_MAX)
                         {
-                            throw std::runtime_error("MIPS Integer Overflow on add");
+                            throw std::runtime_error("MIPS Integer Overflow on sub");
                         }
                         else
                         {
-                            regs.writeS(rd, t);
+                            regs.writeS(rd, static_cast<int32_t>(t));
                         }
-            
                         break;
                     }
 
                     case FUNCT_AND:
-                        // regs[rd] = regs[rs] & regs[rt];
+                    {
+                        uint32_t r = regs.readU(rs) & regs.readU(rt);
+                        regs.writeU(rd, r);
                         break;
+                    }
 
                     case FUNCT_OR:
-                        // regs[rd] = regs[rs] | regs[rt];
+                    {
+                        uint32_t r = regs.readU(rs) | regs.readU(rt);
+                        regs.writeU(rd, r);
                         break;
+                    }
 
                     case FUNCT_SLT:
-                        // regs[rd] = (int32_t)regs[rs] < (int32_t)regs[rt];
+                    {
+                        int32_t a = regs.readS(rs);
+                        int32_t b = regs.readS(rt);
+                        uint32_t r = (a < b) ? 1u : 0u;
+                        regs.writeU(rd, r);
                         break;
+                    }
 
                     case FUNCT_SLL:
-                        // regs[rd] = regs[rt] << shamt;
+                    {
+                        // rd = rt << shamt (logical)
+                        uint32_t r = regs.readU(rt) << shamt;
+                        regs.writeU(rd, r);
                         break;
+                    }
 
                     case FUNCT_SRL:
-                        // regs[rd] = (uint32_t)regs[rt] >> shamt;
+                    {
+                        // rd = rt >> shamt (logical)
+                        uint32_t r = regs.readU(rt) >> shamt;
+                        regs.writeU(rd, r);
                         break;
+                    }
 
                     case FUNCT_SRA:
-                        // regs[rd] = (int32_t)regs[rt] >> shamt;
+                    {
+                        // rd = rt >> shamt (arithmetic)
+                        int32_t v = regs.readS(rt);
+                        int32_t r = v >> shamt;
+                        regs.writeS(rd, r);
                         break;
+                    }
+
+                    default:
+                        // unknown funct for R-type
+                        throw std::runtime_error("Unknown R-type funct");
                 }
             }
             break;

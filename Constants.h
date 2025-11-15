@@ -41,5 +41,17 @@ enum Funct : uint8_t
     FUNCT_SLT = 0x2A  // 101010b
 };
 
+// text segment bounds
+static const uint32_t TEXT_BASE  = 0x00400000;
+static const uint32_t TEXT_LIMIT = 0x10000000; // just before data
+
+// data segment bounds
+static const uint32_t DATA_BASE  = 0x10000000;
+static const uint32_t DATA_LIMIT = 0x10040000; // from your notes
+
+// stack
+static const uint32_t STACK_BASE = 0x7fffeffc; // initial $sp
+static const uint32_t STACK_LIMIT= 0x80000000; // top of stack region (exclusive)
+
 #endif
 
