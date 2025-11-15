@@ -6,25 +6,53 @@
 #ifndef CPU_H
 #define CPU_H
 
+#include <cstdint>
+#include <stdexcept>
+#include <limits>
+
 #include "mybitlib.h"
 #include "RegisterFile.h"
+#include "Memory.h"
+#include "Constants.h"
 
+//==============================================================
+// CPU
+//==============================================================
 class CPU
 {
 public:
+    // CPU holds a reference to the machine's memory
+    CPU(Memory & m)
+        : regs(), mem(m), pc(TEXT_BASE)
+    {}
+
+    void reset()
+    {
+        regs.reset();
+        pc = TEXT_BASE;
+    }
+
+    // one step of execution: fetch, bump PC, then execute
+    void step()
+    {
+        uint32_t word = mem.load32(pc);
+        pc += 4; // default PC increment
+        execute(word);
+    }
+
     void execute(uint32_t word)
     {
         uint8_t opcode = (word >> 26) & mask_bits(6);
-        
+
         switch (opcode)
         {
             case OP_RTYPE: // R-format
             {
-                uint8_t rs = (word >> 21) & mask_bits(5);
-                uint8_t rt = (word >> 16) & mask_bits(5);
-                uint8_t rd = (word >> 11) & mask_bits(5);
-                uint8_t shamt = (word >> 6) & mask_bits(5);
-                uint8_t funct = word & mask_bits(6);
+                uint8_t rs    = (word >> 21) & mask_bits(5);
+                uint8_t rt    = (word >> 16) & mask_bits(5);
+                uint8_t rd    = (word >> 11) & mask_bits(5);
+                uint8_t shamt = (word >>  6) & mask_bits(5);
+                uint8_t funct =  word        & mask_bits(6);
 
                 switch (funct)
                 {
@@ -34,14 +62,12 @@ public:
                         int64_t b = static_cast<int64_t>(regs.readS(rt));
                         int64_t t = a + b;
 
-                        if (t < INT32_MIN || t > INT32_MAX)
+                        if (t < std::numeric_limits<int32_t>::min() ||
+                            t > std::numeric_limits<int32_t>::max())
                         {
-                            throw std::runtime_error("MIPS Integer Overflow on add");
+                            throw std::runtime_error("MIPS integer overflow on add");
                         }
-                        else
-                        {
-                            regs.writeS(rd, static_cast<int32_t>(t));
-                        }
+                        regs.writeS(rd, static_cast<int32_t>(t));
                         break;
                     }
 
@@ -51,14 +77,12 @@ public:
                         int64_t b = static_cast<int64_t>(regs.readS(rt));
                         int64_t t = a - b;
 
-                        if (t < INT32_MIN || t > INT32_MAX)
+                        if (t < std::numeric_limits<int32_t>::min() ||
+                            t > std::numeric_limits<int32_t>::max())
                         {
-                            throw std::runtime_error("MIPS Integer Overflow on sub");
+                            throw std::runtime_error("MIPS integer overflow on sub");
                         }
-                        else
-                        {
-                            regs.writeS(rd, static_cast<int32_t>(t));
-                        }
+                        regs.writeS(rd, static_cast<int32_t>(t));
                         break;
                     }
 
@@ -111,19 +135,23 @@ public:
                     }
 
                     default:
-                        // unknown funct for R-type
                         throw std::runtime_error("Unknown R-type funct");
                 }
+                break;
             }
-            break;
+
+            // TODO: add I-format and J-format opcodes (addi, lw, sw, beq, j, etc.)
+
+            default:
+                throw std::runtime_error("Unknown opcode");
         }
     }
-    
+
     // member variables
-    //=======================
     RegisterFile regs;
-    // Memory mem -> std::map<unsigned int, unsigned char>
-    uint32_t pc;
+    Memory &     mem;
+    uint32_t     pc;
 };
 
-#endif
+#endif // CPU_H
+

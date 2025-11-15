@@ -13,6 +13,7 @@
 #include "Parser.h"
 #include "CPU.h"
 //#include "Executor.h"
+#include "Interpreter.h"
 
 void test_lex_core_(const std::string & s)
 {
@@ -123,8 +124,7 @@ void test_parse_line_(const std::string & s)
     try
     {
         uint32_t word = Parser::parse_line_core(toks, s);
-        CPU cpu;
-        cpu.execute(word);
+        
         std::cout << "Encoded word: ";
         if (word == 0)
         {
@@ -221,8 +221,20 @@ void test_parser()
 
 int main()
 {
-    //test_lex_core();
-    test_parser();
+    // test_lex_core();
+    // test_parser();
+
+    Interpreter interpreter;
+    try
+    {
+        Interpreter interpreter;
+        interpreter.repl(std::cin, std::cout);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Fatal error: " << e.what() << "\n";
+        return 1;
+    }
     
     return 0;
 }

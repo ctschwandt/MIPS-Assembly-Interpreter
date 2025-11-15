@@ -60,7 +60,7 @@ public:
     }
 
     // append a sequence of bytes to the data segment at data_cursor.
-    void emit_data_bytes(const uint8_t* bytes, std::size_t n)
+    void emit_data_bytes(const uint8_t * bytes, std::size_t n)
     {
         if (data_cursor + n > DATA_LIMIT)
             throw std::runtime_error("emit_data_bytes: data segment overflow");
@@ -96,7 +96,7 @@ public:
     void emit_data_asciiz(const char* s)
     {
         // write characters including terminating '\0'
-        const char* p = s;
+        const char * p = s;
         while (*p)
         {
             uint8_t c = static_cast<uint8_t>(*p);
@@ -113,7 +113,7 @@ public:
     CPU         cpu;
     uint32_t    text_cursor;   // next free address in text segment
     uint32_t    data_cursor;   // next free address in data segment
-    SegmentMode seg_mode;      // current assembly target (.text / .data)
+    bool        in_text_mode;  // current assembly target (.text / .data)
 };
 
 #endif // MACHINE_H

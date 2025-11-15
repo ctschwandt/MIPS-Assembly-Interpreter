@@ -137,22 +137,51 @@ public:
         if (tok.type != REGISTER)
             throw std::runtime_error("Expected register token");
 
-        static const std::unordered_map<std::string, int> REG_TABLE = {
-            {"$zero", 0}, {"$0", 0},
-            {"$at",   1},
-            {"$v0",   2}, {"$v1", 3},
-            {"$a0",   4}, {"$a1", 5}, {"$a2", 6}, {"$a3", 7},
-            {"$t0",   8}, {"$t1", 9}, {"$t2",10}, {"$t3",11},
-            {"$t4",  12}, {"$t5",13}, {"$t6",14}, {"$t7",15},
-            {"$s0",  16}, {"$s1",17}, {"$s2",18}, {"$s3",19},
-            {"$s4",  20}, {"$s5",21}, {"$s6",22}, {"$s7",23},
-            {"$t8",  24}, {"$t9",25},
-            {"$k0",  26}, {"$k1",27},
-            {"$gp",  28},
-            {"$sp",  29},
-            {"$fp",  30}, {"$s8",30},
-            {"$ra",  31},
-        };
+        static const std::unordered_map<std::string, uint8_t> REG_TABLE =
+            {
+                {"$zero", 0}, {"$0", 0},
+
+                {"$at",   1}, {"$1",  1},
+
+                {"$v0",   2}, {"$2",  2},
+                {"$v1",   3}, {"$3",  3},
+
+                {"$a0",   4}, {"$4",  4},
+                {"$a1",   5}, {"$5",  5},
+                {"$a2",   6}, {"$6",  6},
+                {"$a3",   7}, {"$7",  7},
+
+                {"$t0",   8}, {"$8",  8},
+                {"$t1",   9}, {"$9",  9},
+                {"$t2",  10}, {"$10",10},
+                {"$t3",  11}, {"$11",11},
+                {"$t4",  12}, {"$12",12},
+                {"$t5",  13}, {"$13",13},
+                {"$t6",  14}, {"$14",14},
+                {"$t7",  15}, {"$15",15},
+
+                {"$s0",  16}, {"$16",16},
+                {"$s1",  17}, {"$17",17},
+                {"$s2",  18}, {"$18",18},
+                {"$s3",  19}, {"$19",19},
+                {"$s4",  20}, {"$20",20},
+                {"$s5",  21}, {"$21",21},
+                {"$s6",  22}, {"$22",22},
+                {"$s7",  23}, {"$23",23},
+
+                {"$t8",  24}, {"$24",24},
+                {"$t9",  25}, {"$25",25},
+
+                {"$k0",  26}, {"$26",26},
+                {"$k1",  27}, {"$27",27},
+
+                {"$gp",  28}, {"$28",28},
+                {"$sp",  29}, {"$29",29},
+
+                {"$fp",  30}, {"$s8",30}, {"$30",30},
+
+                {"$ra",  31}, {"$31",31},
+            };
 
         std::string name = tok.get_string(line);
         auto it = REG_TABLE.find(name);
@@ -296,8 +325,7 @@ public:
         // instruction mnemonic must be IDENTIFIER here
         if (toks[i].type != IDENTIFIER)
         {
-            // TODO: error handling: expected mnemonic
-            return 0;
+            throw std::runtime_error("Expected instruction mnemonic at start of line");
         }
 
         // get instruction info
@@ -312,8 +340,7 @@ public:
         {
             if (j >= (int)toks.size() || toks[j].type != pattern[k])
             {
-                // TODO: error reporting
-                return 0;
+                throw std::runtime_error("Unknown assembly pattern");
             }
         }
 
