@@ -20,26 +20,39 @@
 
 /*
   todo:
-  - rest of the r-format instructions
+  - r format instructions
+    - other R-type: jr, jalr, syscall
+
   - i format instructions
-  - handle psuedoinstructions
+    - I_LS:    lw, sw, lb, lbu, lh, lhu,
+               sb, sh, sc
+    - I_BRANCH: beq, bne, bgtz, blez, bgez, bltz
+
+  - j format instructions
+    - JUMP: j, jal
+
+  - handle pseudoinstructions
+    - move, li, la, lw (with label),
+      blt, ble, bgt, bge
+
   - labels display
   - labels parsed and stored in label table (store text address)
-  - j format instructions
   - data segment display
   - add things to data segment (.word, .asciiz, etc)
+    -- need some function that handles assembly directives. the parser
+       does not look at those lines
 
   dr liow feature list:
   - The user can enter SPIM instruction and data at the prompt.
-● The user can load a SPIM program.
-● The simulator executes instruction and data input whenever possible. If an invalid instruction
-was entered the program displays a warning that should help in debugging the instruction.
-● The user can view the state of the MIPS including the text, data segment and labels.
-● The user can re-execute the program that was interactively entered from the first instruction.
-● The user can save the program entered into a file.
-● [OPTIONAL] The user inserts breakpoints and singlestep/multi-step through the program.
-● [OPTIONAL] The user can set environment variables such as setting the verbosity of the
-simulator.
+  - The user can load a SPIM program.
+  - The simulator executes instruction and data input whenever possible. If an invalid instruction
+    was entered the program displays a warning that should help in debugging the instruction.
+  - The user can view the state of the MIPS including the text, data segment and labels.
+  - The user can re-execute the program that was interactively entered from the first instruction.
+  - The user can save the program entered into a file.
+  - [OPTIONAL] The user inserts breakpoints and singlestep/multi-step through the program.
+  - [OPTIONAL] The user can set environment variables such as setting the verbosity of the
+    simulator.
   
   bugs:
  */
@@ -241,7 +254,7 @@ private:
         }
         else if (is_cmd(line, "regs"))
         {
-            dump_registers(out);
+            print_registers(out);
         }
         else if (is_cmd(line, "run"))
         {
@@ -275,7 +288,7 @@ private:
             << "  exit/quit  - quit interpreter\n";
     }
 
-    void dump_registers(std::ostream & out) const
+    void print_registers(std::ostream & out) const
     {
         out << std::setfill('=') << std::setw(65) << '\n';
         out << "REGISTERS\n";

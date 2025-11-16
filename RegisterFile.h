@@ -60,8 +60,8 @@ class RegisterFile
         for (auto & r : x_)
         {
             r = 0;
-            hi_ = lo_ = 0;
         }
+        hi_ = lo_ = 0;
     }
     
   private:

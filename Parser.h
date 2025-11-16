@@ -46,37 +46,92 @@ public:
     static InstrInfo get_instr_info(const std::string & mnemonic)
     {
         static const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
-            // R-type arithmetic
-            { "add",  { R3,      OP_RTYPE, FUNCT_ADD } },
-            { "sub",  { R3,      OP_RTYPE, FUNCT_SUB } },
-            { "and",  { R3,      OP_RTYPE, FUNCT_AND } },
-            { "or",   { R3,      OP_RTYPE, FUNCT_OR  } },
-            { "slt",  { R3,      OP_RTYPE, FUNCT_SLT } },
+            //==========================================================
+            // R-type arithmetic / logical: rd, rs, rt   (R3)
+            //==========================================================
+            { "add",   { R3,      OP_RTYPE, FUNCT_ADD   } },
+            { "addu",  { R3,      OP_RTYPE, FUNCT_ADDU  } },
+            { "sub",   { R3,      OP_RTYPE, FUNCT_SUB   } },
+            { "subu",  { R3,      OP_RTYPE, FUNCT_SUBU  } },
+            { "and",   { R3,      OP_RTYPE, FUNCT_AND   } },
+            { "or",    { R3,      OP_RTYPE, FUNCT_OR    } },
+            { "xor",   { R3,      OP_RTYPE, FUNCT_XOR   } },
+            { "nor",   { R3,      OP_RTYPE, FUNCT_NOR   } },
+            { "slt",   { R3,      OP_RTYPE, FUNCT_SLT   } },
+            { "sltu",  { R3,      OP_RTYPE, FUNCT_SLTU  } },
+            { "seq",   { R3,      OP_RTYPE, FUNCT_SEQ   } }, // pseudo-ish set-equal
 
-            // R-type shifts
-            { "sll",  { RSHIFT,  OP_RTYPE, FUNCT_SLL } },
-            { "srl",  { RSHIFT,  OP_RTYPE, FUNCT_SRL } },
-            { "sra",  { RSHIFT,  OP_RTYPE, FUNCT_SRA } },
+            // Multiply / divide to hi/lo
+            { "mult",  { R3,      OP_RTYPE, FUNCT_MULT  } },
+            { "multu", { R3,      OP_RTYPE, FUNCT_MULTU } },
+            { "div",   { R3,      OP_RTYPE, FUNCT_DIV   } },
+            { "divu",  { R3,      OP_RTYPE, FUNCT_DIVU  } },
 
-            // I-type arithmetic / logical
-            { "addi", { I_ARITH, OP_ADDI,  FUNCT_NONE } },
-            { "andi", { I_ARITH, OP_ANDI,  FUNCT_NONE } },
-            { "ori",  { I_ARITH, OP_ORI,   FUNCT_NONE } },
-            { "slti", { I_ARITH, OP_SLTI,  FUNCT_NONE } },
+            // Moves to/from hi/lo (one register operand)
+            { "mfhi",  { R3,      OP_RTYPE, FUNCT_MFHI  } },
+            { "mflo",  { R3,      OP_RTYPE, FUNCT_MFLO  } },
+            { "mthi",  { R3,      OP_RTYPE, FUNCT_MTHI  } },
+            { "mtlo",  { R3,      OP_RTYPE, FUNCT_MTLO  } },
 
-            // load/store
-            { "lw",   { I_LS,    OP_LW,    FUNCT_NONE } },
-            { "sw",   { I_LS,    OP_SW,    FUNCT_NONE } },
-            { "lb",   { I_LS,    OP_LB,    FUNCT_NONE } },
-            { "sb",   { I_LS,    OP_SB,    FUNCT_NONE } },
+            //==========================================================
+            // R-type shifts with shamt: rd, rt, shamt   (RSHIFT)
+            //==========================================================
+            { "sll",   { RSHIFT,  OP_RTYPE, FUNCT_SLL   } },
+            { "srl",   { RSHIFT,  OP_RTYPE, FUNCT_SRL   } },
+            { "sra",   { RSHIFT,  OP_RTYPE, FUNCT_SRA   } },
 
-            // branches
-            { "beq",  { I_BRANCH,OP_BEQ,   FUNCT_NONE } },
-            { "bne",  { I_BRANCH,OP_BNE,   FUNCT_NONE } },
+            // Variable shifts: rd, rs, rt   (you may later give them their own type)
+            { "sllv",  { R3,      OP_RTYPE, FUNCT_SLLV  } },
+            { "srlv",  { R3,      OP_RTYPE, FUNCT_SRLV  } },
+            { "srav",  { R3,      OP_RTYPE, FUNCT_SRAV  } },
 
-            // jumps
-            { "j",    { JUMP,    OP_J,     FUNCT_NONE } },
-            { "jal",  { JUMP,    OP_JAL,   FUNCT_NONE } },
+            //==========================================================
+            // R-type jumps / syscall
+            //==========================================================
+            { "jr",    { JUMP,    OP_RTYPE, FUNCT_JR    } },   // jr rs
+            { "jalr",  { JUMP,    OP_RTYPE, FUNCT_JALR  } },   // jalr rd, rs (you can fix type later)
+            { "syscall",{ R3,     OP_RTYPE, FUNCT_SYSCALL } }, // no explicit operands
+
+            //==========================================================
+            // I-type arithmetic / logical: rt, rs, imm   (I_ARITH)
+            //==========================================================
+            { "addi",  { I_ARITH, OP_ADDI,  FUNCT_NONE  } },
+            { "addiu", { I_ARITH, OP_ADDIU, FUNCT_NONE  } },
+            { "andi",  { I_ARITH, OP_ANDI,  FUNCT_NONE  } },
+            { "ori",   { I_ARITH, OP_ORI,   FUNCT_NONE  } },
+            { "xori",  { I_ARITH, OP_XORI,  FUNCT_NONE  } },
+            { "slti",  { I_ARITH, OP_SLTI,  FUNCT_NONE  } },
+            { "sltiu", { I_ARITH, OP_SLTIU, FUNCT_NONE  } },
+            { "lui",   { I_ARITH, OP_LUI,   FUNCT_NONE  } },   // rt, imm (rs = $zero)
+
+            //==========================================================
+            // I-type load/store: rt, offset(rs)         (I_LS)
+            //==========================================================
+            { "lw",    { I_LS,    OP_LW,    FUNCT_NONE  } },
+            { "sw",    { I_LS,    OP_SW,    FUNCT_NONE  } },
+            { "lb",    { I_LS,    OP_LB,    FUNCT_NONE  } },
+            { "lbu",   { I_LS,    OP_LBU,   FUNCT_NONE  } },
+            { "lh",    { I_LS,    OP_LH,    FUNCT_NONE  } },
+            { "lhu",   { I_LS,    OP_LHU,   FUNCT_NONE  } },
+            { "sb",    { I_LS,    OP_SB,    FUNCT_NONE  } },
+            { "sh",    { I_LS,    OP_SH,    FUNCT_NONE  } },
+            { "sc",    { I_LS,    OP_SC,    FUNCT_NONE  } },   // same addressing shape
+
+            //==========================================================
+            // I-type branches
+            //   - two-register: rs, rt, label          (I_BRANCH)
+            //   - one-register: rs, label              (still I_BRANCH for now)
+            //==========================================================
+            { "beq",   { I_BRANCH,OP_BEQ,   FUNCT_NONE  } },
+            { "bne",   { I_BRANCH,OP_BNE,   FUNCT_NONE  } },
+            { "bgtz",  { I_BRANCH,OP_BGTZ,  FUNCT_NONE  } },   // rs, label
+            { "blez",  { I_BRANCH,OP_BLEZ,  FUNCT_NONE  } },   // rs, label
+            
+            //==========================================================
+            // Jumps (J-format): label                  (JUMP)
+            //==========================================================
+            { "j",     { JUMP,    OP_J,     FUNCT_NONE  } },
+            { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } }
         };
 
         auto it = INSTR_TABLE.find(mnemonic);
