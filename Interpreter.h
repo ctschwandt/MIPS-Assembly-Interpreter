@@ -23,24 +23,18 @@
   - r format instructions
     - other R-type: jr, jalr, syscall
 
-  - i format instructions
-    - I_LS:    lw, sw, lb, lbu, lh, lhu,
-               sb, sh, sc
-    - I_BRANCH: beq, bne, bgtz, blez, bgez, bltz
-
   - j format instructions
-    - JUMP: j, jal
+    - JUMP: b
 
   - handle pseudoinstructions
     - move, li, la, lw (with label),
       blt, ble, bgt, bge
 
-  - labels display
-  - labels parsed and stored in label table (store text address)
-  - data segment display
   - add things to data segment (.word, .asciiz, etc)
     -- need some function that handles assembly directives. the parser
        does not look at those lines
+
+  - segment display handles strange chars (\0, \n, etc)
 
   dr liow feature list:
   - The user can enter SPIM instruction and data at the prompt.
@@ -132,7 +126,7 @@ const char * uint_to_reg(unsigned i)
         "$fp",   // 30 (aka $s8)
         "$ra"    // 31
     };
-    return (i < 32) ? names[i] : "??";
+    return (0 <= i && i < 32) ? REGISTER_NAMES[i] : "??";
 }
 
 //==============================================================
@@ -142,7 +136,7 @@ class Interpreter
 {
 public:
     Interpreter()
-        : machine(), lexer(), parser(), line_number(1)
+        : machine(), lexer(), parser(machine), line_number(1)
     {}
 
     void reset()
@@ -191,7 +185,8 @@ public:
             }
 
             // otherwise: treat as assembly in current segment
-            // Remember old cursor so we can roll back on error
+            
+            // remember old cursor so I can roll back on error
             uint32_t old_text_cursor = machine.text_cursor;
 
             try
@@ -201,11 +196,18 @@ public:
                     // assemble instruction(s) into text segment
                     assemble_text_line(line);
 
-                    // interactive execution: run newly emitted instructions
-                    // from old_text_cursor up to new text_cursor.
-                    while (machine.cpu.pc < machine.text_cursor)
+                    if (!machine.has_unresolved_fixups())
                     {
-                        machine.cpu.step();
+                        // run newly emitted instructions
+                        // from old_text_cursor up to new text_cursor.
+                        while (machine.cpu.pc < machine.text_cursor)
+                        {
+                            machine.cpu.step();
+                        }
+                    }
+                    else
+                    {
+                        out << "Execution paused: unresolved labels remain.\n";          
                     }
                 }
                 else
@@ -228,8 +230,8 @@ public:
 
 private:
     Machine machine;
-    Lexer   lexer;
-    Parser  parser;
+    Lexer lexer;
+    Parser parser;
     int line_number;
 
     //==========================================================
@@ -242,6 +244,9 @@ private:
                 is_cmd(line, "regs")   ||
                 is_cmd(line, "run")    ||
                 is_cmd(line, "reset")  ||
+                is_cmd(line, "data")   ||
+                is_cmd(line, "stack")  ||
+                is_cmd(line, "labels") ||
                 is_cmd(line, "exit")   ||
                 is_cmd(line, "quit");
     }
@@ -256,6 +261,10 @@ private:
         {
             print_registers(out);
         }
+        else if (is_cmd(line, "labels"))
+        {
+            print_labels(out);
+        }
         else if (is_cmd(line, "run"))
         {
             run_program(out);
@@ -264,6 +273,14 @@ private:
         {
             machine.reset();
             out << "Machine reset.\n";
+        }
+        else if (is_cmd(line, "data"))
+        {
+            print_data_segment(out);
+        }
+        else if (is_cmd(line, "stack"))
+        {
+            print_stack(out);
         }
         else if (is_cmd(line, "exit") || is_cmd(line, "quit"))
         {
@@ -283,6 +300,9 @@ private:
             << "  .text      - switch to text segment\n"
             << "  .data      - switch to data segment\n"
             << "  regs       - show register file\n"
+            << "  data       - show data segment in use\n"
+            << "  stack      - show stack segment in use\n"
+            << "  labels     - show all currently defined labels\n"
             << "  run        - run program from TEXT_BASE to current text_cursor\n"
             << "  reset      - reset machine (regs, pc, cursors, memory)\n"
             << "  exit/quit  - quit interpreter\n";
@@ -357,6 +377,21 @@ private:
         out << std::setfill(' ');
     }
 
+    void print_stack(std::ostream & out) const
+    {
+        machine.mem.print_region(out, STACK_BASE, STACK_LIMIT, "STACK SEGMENT");
+    }
+
+    void print_data_segment(std::ostream & out) const
+    {
+        machine.mem.print_region(out, DATA_BASE, DATA_LIMIT, "DATA SEGMENT");
+    }
+
+    void print_labels(std::ostream & out) const
+    {
+        machine.print_labels(out);
+    }
+
     void run_program(std::ostream & out)
     {
         // - start PC at TEXT_BASE
@@ -395,12 +430,17 @@ private:
         // (do I even need token vector?)
         std::vector< Token > toks;
         lexer.lex_core(toks, line, line_number);
+        // if (print_toks): // mode set in interpreter to show extra print out
         println_toks_detail(toks, line);
-        
-        uint32_t word = Parser::parse_line_core(toks, line);
-        machine.emit_text_word(word);
-        //machine.cpu.execute(word);
-        //parser.assemble_text_line(line, machine, lexer);
+
+        uint32_t line_pc = machine.text_cursor;
+
+        std::vector< uint32_t > words = parser.assemble_text_line(toks, line, line_pc);
+
+        for (uint32_t word : words)
+        {
+            machine.emit_text_word(word);
+        }
     }
 };
 

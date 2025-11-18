@@ -9,24 +9,13 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <stdexcept>
+#include <limits>
 
 #include "Constants.h"
 #include "Token.h"
 #include "Lexer.h"
-
-//==============================================================
-// Instruction Types
-//==============================================================
-enum InstrType
-{
-    R3,        // R-format: rd, rs, rt        (add, sub, and, or, slt, ...)
-    RSHIFT,    // R-format: rd, rt, shamt     (sll, srl, sra)
-    I_ARITH,   // I-format: rt, rs, imm       (addi, andi, ori, slti, ...)
-    I_LS,      // I-format: rt, offset(rs)    (lw, sw, lb, sb, ...)
-    I_BRANCH,  // I-format: rs, rt, label     (beq, bne)
-    JUMP,      // J-format: label             (j, jal)
-    NUM_INSTRTYPE
-};
+#include "Machine.h"
 
 //==============================================================
 // Parser
@@ -34,106 +23,13 @@ enum InstrType
 class Parser
 {
 public:
-    // info about an instruction mnemonic
-    struct InstrInfo
-    {
-        InstrType type;
-        Opcode    opcode;  // 6-bit opcode field
-        Funct     funct;   // 6-bit funct field (R-type); 0 / FUNCT_NONE for non-R
-    };
-
+    Parser(Machine & m)
+        : machine(m)
+    {}
+    
     // mnemonic string -> InstrInfo
     static InstrInfo get_instr_info(const std::string & mnemonic)
     {
-        static const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
-            //==========================================================
-            // R-type arithmetic / logical: rd, rs, rt   (R3)
-            //==========================================================
-            { "add",   { R3,      OP_RTYPE, FUNCT_ADD   } },
-            { "addu",  { R3,      OP_RTYPE, FUNCT_ADDU  } },
-            { "sub",   { R3,      OP_RTYPE, FUNCT_SUB   } },
-            { "subu",  { R3,      OP_RTYPE, FUNCT_SUBU  } },
-            { "and",   { R3,      OP_RTYPE, FUNCT_AND   } },
-            { "or",    { R3,      OP_RTYPE, FUNCT_OR    } },
-            { "xor",   { R3,      OP_RTYPE, FUNCT_XOR   } },
-            { "nor",   { R3,      OP_RTYPE, FUNCT_NOR   } },
-            { "slt",   { R3,      OP_RTYPE, FUNCT_SLT   } },
-            { "sltu",  { R3,      OP_RTYPE, FUNCT_SLTU  } },
-            { "seq",   { R3,      OP_RTYPE, FUNCT_SEQ   } }, // pseudo-ish set-equal
-
-            // Multiply / divide to hi/lo
-            { "mult",  { R3,      OP_RTYPE, FUNCT_MULT  } },
-            { "multu", { R3,      OP_RTYPE, FUNCT_MULTU } },
-            { "div",   { R3,      OP_RTYPE, FUNCT_DIV   } },
-            { "divu",  { R3,      OP_RTYPE, FUNCT_DIVU  } },
-
-            // Moves to/from hi/lo (one register operand)
-            { "mfhi",  { R3,      OP_RTYPE, FUNCT_MFHI  } },
-            { "mflo",  { R3,      OP_RTYPE, FUNCT_MFLO  } },
-            { "mthi",  { R3,      OP_RTYPE, FUNCT_MTHI  } },
-            { "mtlo",  { R3,      OP_RTYPE, FUNCT_MTLO  } },
-
-            //==========================================================
-            // R-type shifts with shamt: rd, rt, shamt   (RSHIFT)
-            //==========================================================
-            { "sll",   { RSHIFT,  OP_RTYPE, FUNCT_SLL   } },
-            { "srl",   { RSHIFT,  OP_RTYPE, FUNCT_SRL   } },
-            { "sra",   { RSHIFT,  OP_RTYPE, FUNCT_SRA   } },
-
-            // Variable shifts: rd, rs, rt   (you may later give them their own type)
-            { "sllv",  { R3,      OP_RTYPE, FUNCT_SLLV  } },
-            { "srlv",  { R3,      OP_RTYPE, FUNCT_SRLV  } },
-            { "srav",  { R3,      OP_RTYPE, FUNCT_SRAV  } },
-
-            //==========================================================
-            // R-type jumps / syscall
-            //==========================================================
-            { "jr",    { JUMP,    OP_RTYPE, FUNCT_JR    } },   // jr rs
-            { "jalr",  { JUMP,    OP_RTYPE, FUNCT_JALR  } },   // jalr rd, rs (you can fix type later)
-            { "syscall",{ R3,     OP_RTYPE, FUNCT_SYSCALL } }, // no explicit operands
-
-            //==========================================================
-            // I-type arithmetic / logical: rt, rs, imm   (I_ARITH)
-            //==========================================================
-            { "addi",  { I_ARITH, OP_ADDI,  FUNCT_NONE  } },
-            { "addiu", { I_ARITH, OP_ADDIU, FUNCT_NONE  } },
-            { "andi",  { I_ARITH, OP_ANDI,  FUNCT_NONE  } },
-            { "ori",   { I_ARITH, OP_ORI,   FUNCT_NONE  } },
-            { "xori",  { I_ARITH, OP_XORI,  FUNCT_NONE  } },
-            { "slti",  { I_ARITH, OP_SLTI,  FUNCT_NONE  } },
-            { "sltiu", { I_ARITH, OP_SLTIU, FUNCT_NONE  } },
-            { "lui",   { I_ARITH, OP_LUI,   FUNCT_NONE  } },   // rt, imm (rs = $zero)
-
-            //==========================================================
-            // I-type load/store: rt, offset(rs)         (I_LS)
-            //==========================================================
-            { "lw",    { I_LS,    OP_LW,    FUNCT_NONE  } },
-            { "sw",    { I_LS,    OP_SW,    FUNCT_NONE  } },
-            { "lb",    { I_LS,    OP_LB,    FUNCT_NONE  } },
-            { "lbu",   { I_LS,    OP_LBU,   FUNCT_NONE  } },
-            { "lh",    { I_LS,    OP_LH,    FUNCT_NONE  } },
-            { "lhu",   { I_LS,    OP_LHU,   FUNCT_NONE  } },
-            { "sb",    { I_LS,    OP_SB,    FUNCT_NONE  } },
-            { "sh",    { I_LS,    OP_SH,    FUNCT_NONE  } },
-            { "sc",    { I_LS,    OP_SC,    FUNCT_NONE  } },   // same addressing shape
-
-            //==========================================================
-            // I-type branches
-            //   - two-register: rs, rt, label          (I_BRANCH)
-            //   - one-register: rs, label              (still I_BRANCH for now)
-            //==========================================================
-            { "beq",   { I_BRANCH,OP_BEQ,   FUNCT_NONE  } },
-            { "bne",   { I_BRANCH,OP_BNE,   FUNCT_NONE  } },
-            { "bgtz",  { I_BRANCH,OP_BGTZ,  FUNCT_NONE  } },   // rs, label
-            { "blez",  { I_BRANCH,OP_BLEZ,  FUNCT_NONE  } },   // rs, label
-            
-            //==========================================================
-            // Jumps (J-format): label                  (JUMP)
-            //==========================================================
-            { "j",     { JUMP,    OP_J,     FUNCT_NONE  } },
-            { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } }
-        };
-
         auto it = INSTR_TABLE.find(mnemonic);
         if (it == INSTR_TABLE.end())
         {
@@ -164,26 +60,6 @@ public:
     // InstrType -> expected token pattern AFTER mnemonic
     static const std::vector<TokenType> & get_pattern(InstrType type)
     {
-        static const std::vector<TokenType> PATTERNS[NUM_INSTRTYPE] = {
-            // R3: rd, rs, rt          e.g. add $t0, $t1, $t2
-            { REGISTER, COMMA, REGISTER, COMMA, REGISTER, EOL },
-
-            // RSHIFT: rd, rt, shamt   e.g. sll $t0, $t1, 4
-            { REGISTER, COMMA, REGISTER, COMMA, INT, EOL },
-
-            // I_ARITH: rt, rs, imm    e.g. addi $t0, $t1, 42
-            { REGISTER, COMMA, REGISTER, COMMA, INT, EOL },
-
-            // I_LS: rt, offset(rs)    e.g. lw $t0, 4($t1)
-            { REGISTER, COMMA, INT, LPAREN, REGISTER, RPAREN, EOL },
-
-            // I_BRANCH: rs, rt, label e.g. beq $t0, $t1, LOOP
-            { REGISTER, COMMA, REGISTER, COMMA, IDENTIFIER, EOL },
-
-            // JUMP: label             e.g. j LOOP
-            { IDENTIFIER, EOL },
-        };
-
         return PATTERNS[int(type)];
     }
 
@@ -191,52 +67,6 @@ public:
     {
         if (tok.type != REGISTER)
             throw std::runtime_error("Expected register token");
-
-        static const std::unordered_map<std::string, uint8_t> REG_TABLE =
-            {
-                {"$zero", 0}, {"$0", 0},
-
-                {"$at",   1}, {"$1",  1},
-
-                {"$v0",   2}, {"$2",  2},
-                {"$v1",   3}, {"$3",  3},
-
-                {"$a0",   4}, {"$4",  4},
-                {"$a1",   5}, {"$5",  5},
-                {"$a2",   6}, {"$6",  6},
-                {"$a3",   7}, {"$7",  7},
-
-                {"$t0",   8}, {"$8",  8},
-                {"$t1",   9}, {"$9",  9},
-                {"$t2",  10}, {"$10",10},
-                {"$t3",  11}, {"$11",11},
-                {"$t4",  12}, {"$12",12},
-                {"$t5",  13}, {"$13",13},
-                {"$t6",  14}, {"$14",14},
-                {"$t7",  15}, {"$15",15},
-
-                {"$s0",  16}, {"$16",16},
-                {"$s1",  17}, {"$17",17},
-                {"$s2",  18}, {"$18",18},
-                {"$s3",  19}, {"$19",19},
-                {"$s4",  20}, {"$20",20},
-                {"$s5",  21}, {"$21",21},
-                {"$s6",  22}, {"$22",22},
-                {"$s7",  23}, {"$23",23},
-
-                {"$t8",  24}, {"$24",24},
-                {"$t9",  25}, {"$25",25},
-
-                {"$k0",  26}, {"$26",26},
-                {"$k1",  27}, {"$27",27},
-
-                {"$gp",  28}, {"$28",28},
-                {"$sp",  29}, {"$29",29},
-
-                {"$fp",  30}, {"$s8",30}, {"$30",30},
-
-                {"$ra",  31}, {"$31",31},
-            };
 
         std::string name = tok.get_string(line);
         auto it = REG_TABLE.find(name);
@@ -358,24 +188,36 @@ public:
         return static_cast<uint8_t>(v);
     }
 
-    static uint32_t parse_line_core(const std::vector<Token> & toks, const std::string & s)
+    std::vector<uint32_t>
+    assemble_text_line(const std::vector< Token > & toks,
+                       const std::string & line,
+                       uint32_t current_pc)
     {
+        std::vector< uint32_t > words;
+
         if (toks.empty())
-            return 0;
+        {
+            std::cout << "No tokens to parse. Returning empty words";
+            return words;
+        }
 
         int i = 0;
 
         // LABEL:
         if (toks[i].type == IDENTIFIER &&
-            i + 1 < (int)toks.size() &&
+            i + 1 < toks.size() &&
             toks[i+1].type == COLON)
         {
-            // TODO: record label name: toks[i].get_string(s)
+            // defines labels when rest of line is garbage
+            // (is that ok?)
+            std::string label = toks[i].get_string(line);
+            machine.define_label(label, current_pc);
             i += 2;
         }
 
-        if (i >= (int)toks.size() || toks[i].type == EOL)
-            return 0; // empty or label-only line
+        // empty line case should just be ignored in interpreter
+        if (toks[i].type == EOL)
+            return words; // empty or label-only line
 
         // instruction mnemonic must be IDENTIFIER here
         if (toks[i].type != IDENTIFIER)
@@ -384,8 +226,8 @@ public:
         }
 
         // get instruction info
-        InstrInfo info = get_instr_info(toks[i], s);
-        const std::vector<TokenType> & pattern = get_pattern(info.type);
+        InstrInfo info = get_instr_info(toks[i], line);
+        const std::vector< TokenType > & pattern = get_pattern(info.type);
 
         int j = i + 1; // first token after mnemonic
 
@@ -407,112 +249,202 @@ public:
 
         switch (info.type)
         {
-        case R3: // rd, rs, rt
-        {
-            uint32_t rd = parse_register(toks[j++], s);
-            ++j; // skip COMMA
-            uint32_t rs = parse_register(toks[j++], s);
-            ++j; // skip COMMA
-            uint32_t rt = parse_register(toks[j++], s);
+            case R3: // rd, rs, rt
+            {
+                uint32_t rd = parse_register(toks[j++], line);
+                ++j; // skip COMMA
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // skip COMMA
+                uint32_t rt = parse_register(toks[j++], line);
 
-            uint32_t op    = static_cast<uint32_t>(info.opcode);
-            uint32_t funct = static_cast<uint32_t>(info.funct);
+                uint32_t op    = static_cast<uint32_t>(info.opcode);
+                uint32_t funct = static_cast<uint32_t>(info.funct);
 
-            word = (op    << 26) |
-                   (rs    << 21) |
-                   (rt    << 16) |
-                   (rd    << 11) |
-                   (0u    <<  6) |
-                   (funct <<  0);
-            break;
+                word = (op    << 26) |
+                    (rs    << 21) |
+                    (rt    << 16) |
+                    (rd    << 11) |
+                    (0u    <<  6) |
+                    (funct <<  0);
+                words.push_back(word);
+                break;
+            }
+
+            case RSHIFT: // rd, rt, shamt
+            {
+                uint32_t rd = parse_register(toks[j++], line);
+                ++j; // skip COMMA
+                uint32_t rt = parse_register(toks[j++], line);
+                ++j; // skip COMMA
+                uint8_t shamt = parse_shamt(toks[j++], line);
+
+                uint32_t op    = static_cast<uint32_t>(info.opcode);
+                uint32_t funct = static_cast<uint32_t>(info.funct);
+
+                word = (op              << 26) |
+                    (0u              << 21) |  // rs = 0 for shifts
+                    (rt              << 16) |
+                    (rd              << 11) |
+                    ((uint32_t)shamt <<  6) |
+                    (funct           <<  0);
+                words.push_back(word);
+                break;
+            }
+
+            case I_ARITH: // rt, rs, imm
+            {
+                uint32_t rt = parse_register(toks[j++], line);
+                ++j; // COMMA
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // COMMA
+
+                int16_t imm16;
+                if (info.opcode == OP_ANDI || info.opcode == OP_ORI)
+                    imm16 = (int16_t)parse_imm16_unsigned(toks[j++], line);
+                else
+                    imm16 = parse_imm16_signed(toks[j++], line);
+
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+
+                word = (op              << 26) |
+                    (rs              << 21) |
+                    (rt              << 16) |
+                    ((uint16_t)imm16);
+                words.push_back(word);
+                break;
+            }
+
+            case I_LS: // rt, offset(rs)
+            {
+                uint32_t rt = parse_register(toks[j++], line);
+                ++j; // COMMA
+
+                int16_t offset = parse_imm16_signed(toks[j++], line);
+
+                ++j; // LPAREN
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // RPAREN
+
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+            
+                word = (op              << 26) |
+                    (rs              << 21) |
+                    (rt              << 16) |
+                    ((uint16_t)offset);
+                words.push_back(word);
+                break;
+            }
+
+            case I_BRANCH: // rs, rt, label
+            {
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // COMMA
+                uint32_t rt = parse_register(toks[j++], line);
+                ++j; // COMMA
+
+                if (toks[j].type != IDENTIFIER)
+                    throw std::runtime_error("Expected label identifier in branch");
+
+                std::string label = toks[j++].get_string(line);
+
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+
+                // pc where this instruction will be stored
+                //uint32_t instr_pc = current_pc;
+                uint32_t instr_pc = current_pc + 4u * static_cast<uint32_t>(words.size());
+
+                uint16_t imm = 0; // placeholder
+
+                // if label is already known, can fully encode
+                if (machine.has_label(label))
+                {
+                    uint32_t target_addr = machine.lookup_label(label);
+
+                    int32_t diff = static_cast<int32_t>(target_addr)
+                        - static_cast<int32_t>(instr_pc + 4);
+
+                    if (diff & 0x3)
+                        throw std::runtime_error("Branch target not word-aligned");
+
+                    int32_t offset = diff >> 2;
+
+                    if (offset < std::numeric_limits<int16_t>::min() ||
+                        offset > std::numeric_limits<int16_t>::max())
+                    {
+                        throw std::runtime_error("Branch offset out of 16-bit range");
+                    }
+
+                    imm = static_cast<uint16_t>(offset & 0xFFFF);
+                }
+
+                word = (op << 26) |
+                    (rs << 21) |
+                    (rt << 16) |
+                    imm;
+
+                words.push_back(word);
+
+                // if label was not yet known,
+                // record a fixup so Machine can patch later
+                if (!machine.has_label(label))
+                {
+                    machine.add_branch_fixup(instr_pc,
+                                             info.opcode,
+                                             rs,
+                                             rt,
+                                             label);
+                }
+
+                break;
+            }
+              
+            case JUMP: // label
+            {
+                if (toks[j].type != IDENTIFIER)
+                    throw std::runtime_error("Expected label identifier after jump");
+
+                std::string label = toks[j++].get_string(line);
+
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+
+                uint32_t instr_pc =
+                    current_pc + 4u * static_cast<uint32_t>(words.size());
+
+                uint32_t target_field = 0; // placeholder
+
+                if (machine.has_label(label))
+                {
+                    uint32_t target_addr = machine.lookup_label(label);
+
+                    if (target_addr & 0x3u)
+                        throw std::runtime_error("Jump target not word-aligned");
+
+                    target_field = (target_addr >> 2) & 0x03FFFFFFu;
+                }
+
+                word = (op << 26) | target_field;
+
+                words.push_back(word);
+
+                if (!machine.has_label(label))
+                {
+                    machine.add_jump_fixup(instr_pc,
+                                           info.opcode,
+                                           label);
+                }
+
+                break;
+            }
+            
+            default:
+                throw std::runtime_error("Unknown instruction pattern");
         }
 
-        case RSHIFT: // rd, rt, shamt
-        {
-            uint32_t rd = parse_register(toks[j++], s);
-            ++j; // skip COMMA
-            uint32_t rt = parse_register(toks[j++], s);
-            ++j; // skip COMMA
-            uint8_t shamt = parse_shamt(toks[j++], s);
-
-            uint32_t op    = static_cast<uint32_t>(info.opcode);
-            uint32_t funct = static_cast<uint32_t>(info.funct);
-
-            word = (op              << 26) |
-                   (0u              << 21) |  // rs = 0 for shifts
-                   (rt              << 16) |
-                   (rd              << 11) |
-                   ((uint32_t)shamt <<  6) |
-                   (funct           <<  0);
-            break;
-        }
-
-        case I_ARITH: // rt, rs, imm
-        {
-            uint32_t rt = parse_register(toks[j++], s);
-            ++j; // COMMA
-            uint32_t rs = parse_register(toks[j++], s);
-            ++j; // COMMA
-
-            int16_t imm16;
-            if (info.opcode == OP_ANDI || info.opcode == OP_ORI)
-                imm16 = (int16_t)parse_imm16_unsigned(toks[j++], s);
-            else
-                imm16 = parse_imm16_signed(toks[j++], s);
-
-            uint32_t op = static_cast<uint32_t>(info.opcode);
-
-            word = (op              << 26) |
-                   (rs              << 21) |
-                   (rt              << 16) |
-                   ((uint16_t)imm16);
-            break;
-        }
-
-        case I_LS: // rt, offset(rs)
-        {
-            uint32_t rt = parse_register(toks[j++], s);
-            ++j; // COMMA
-
-            int16_t offset = parse_imm16_signed(toks[j++], s);
-
-            ++j; // LPAREN
-            uint32_t rs = parse_register(toks[j++], s);
-            ++j; // RPAREN
-
-            uint32_t op = static_cast<uint32_t>(info.opcode);
-
-            word = (op              << 26) |
-                   (rs              << 21) |
-                   (rt              << 16) |
-                   ((uint16_t)offset);
-            break;
-        }
-
-        case I_BRANCH: // rs, rt, label
-        {
-            uint32_t rs = parse_register(toks[j++], s);
-            ++j; // COMMA
-            uint32_t rt = parse_register(toks[j++], s);
-            ++j; // COMMA
-
-            std::string label = toks[j++].get_string(s);
-
-            // TODO: record (info.opcode, rs, rt, label, current_pc) for second pass
-            return 0;
-        }
-
-        case JUMP: // label
-        {
-            std::string label = toks[j++].get_string(s);
-
-            // TODO: record (info.opcode, label, current_pc) for second pass
-            return 0;
-        }
-        }
-
-        return word;
+        return words;
     }
+
+private:
+    Machine & machine;
 };
 
 #endif // PARSER_H

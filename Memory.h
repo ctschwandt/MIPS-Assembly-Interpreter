@@ -116,6 +116,119 @@ public:
         return addr >= STACK_BASE && addr < STACK_LIMIT;
     }
 
+    // print all mapped 32-bit words in [start, limit) in a table
+    void print_region(std::ostream & out,
+                     uint32_t start,
+                     uint32_t limit,
+                     const char * title) const
+    {
+        out << std::setfill('=') << std::setw(65) << '\n';
+        out << title << '\n';
+        out << std::setw(65) << '\n';
+
+        out << std::setfill(' ')
+            << std::setw(12) << "addr (int)"  << '|'
+            << std::setw(12) << "addr (hex)"  << '|'
+            << std::setw(12) << "value (int)" << '|'
+            << std::setw(12) << "value (hex)" << '|'
+            << std::setw(12) << "value (char)" << '\n';
+
+        out << std::setfill('-')
+            << std::setw(13) << '+'   // 12 chars + border
+            << std::setw(13) << '+'
+            << std::setw(13) << '+'
+            << std::setw(13) << '+'
+            << std::setw(13) << '\n';
+        out << std::setfill(' ');
+
+        auto printable = [](uint8_t c) -> char
+        {
+            return (c >= 32 && c < 127) ? static_cast<char>(c) : '.';
+        };
+
+        // collect unique aligned word addresses in [start, limit)
+        // that have at least one mapped byte.
+        std::vector<uint32_t> word_addrs;
+        uint32_t last_word = std::numeric_limits<uint32_t>::max();
+
+        auto it  = mem_.lower_bound(start);
+        auto end = mem_.lower_bound(limit);
+
+        for (; it != end; ++it)
+        {
+            uint32_t addr = it->first;
+            if (addr < start || addr >= limit)
+                continue;
+
+            uint32_t word_addr = addr & ~0x3u; // align down to 4-byte boundary
+            if (word_addr == last_word)
+                continue; // already recorded this word
+            last_word = word_addr;
+
+            if (word_addr + 3 >= limit)
+                continue; // avoid crossing region limit
+
+            word_addrs.push_back(word_addr);
+        }
+
+        if (word_addrs.empty())
+        {
+            out << "  (no mapped words in region)\n";
+        }
+        else
+        {
+            // Print in ascending address order (matches your data example)
+            for (uint32_t addr : word_addrs)
+            {
+                uint32_t w = load32(addr);
+
+                uint8_t b0 = static_cast<uint8_t>((w >> 24) & 0xFF);
+                uint8_t b1 = static_cast<uint8_t>((w >> 16) & 0xFF);
+                uint8_t b2 = static_cast<uint8_t>((w >> 8)  & 0xFF);
+                uint8_t b3 = static_cast<uint8_t>( w        & 0xFF);
+
+                // addr (int)
+                out << std::setw(12) << std::dec << addr << '|';
+
+                // addr (hex) – 8 hex digits, no 0x
+                out << std::setw(12) << std::hex << addr << std::dec << '|';
+
+                // value (int) – signed
+                out << std::setw(12) << static_cast<int32_t>(w) << '|';
+
+                // value (hex) – 4 bytes like "48 65 6c 6c"
+                {
+                    std::ostringstream hex_ss;
+                    hex_ss << std::hex
+                           << std::nouppercase
+                           << static_cast<unsigned>(b0) << ' '
+                           << static_cast<unsigned>(b1) << ' '
+                           << static_cast<unsigned>(b2) << ' '
+                           << static_cast<unsigned>(b3);
+                    out << std::setw(12) << hex_ss.str() << '|';
+                }
+
+                // value (char) – 4 chars separated by spaces
+                {
+                    std::string chars;
+                    chars += printable(b0); chars += ' ';
+                    chars += printable(b1); chars += ' ';
+                    chars += printable(b2); chars += ' ';
+                    chars += printable(b3);
+                    out << std::setw(12) << chars << '\n';
+                }
+            }
+        }
+
+        out << std::setfill('-')
+            << std::setw(13) << '+'
+            << std::setw(13) << '+'
+            << std::setw(13) << '+'
+            << std::setw(13) << '+'
+            << std::setw(13) << '\n';
+        out << std::setfill(' ');
+    }
+
 private:
     bool is_valid_address(uint32_t addr) const
     {

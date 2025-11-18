@@ -4,11 +4,19 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-// 6-bit opcodes (bits 31..26)
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "Token.h"
+
 enum Opcode : uint8_t
 {
     OP_RTYPE = 0x00,  // SPECIAL (R-type)
 
+    OP_REGIMM = 0x01, // bgez, bltz
+    
     OP_J     = 0x02,  // j
     OP_JAL   = 0x03,  // jal
 
@@ -35,7 +43,6 @@ enum Opcode : uint8_t
     OP_SB    = 0x28,  // sb
     OP_SH    = 0x29,  // sh
     OP_SW    = 0x2B,  // sw
-    OP_SC    = 0x38   // sc (store conditional; MIPS II)
 };
 
 // 6-bit funct codes (bits 5..0) for R-type (opcode = 0)
@@ -84,6 +91,216 @@ enum Funct : uint8_t
     FUNCT_SEQ   = 0x28,        // set-if-equal (non-standard, SPIM-style)
     FUNCT_SLT   = 0x2A,        // 101010b
     FUNCT_SLTU  = 0x2B         // 101011b
+};
+
+//==============================================================
+// Instruction metadata
+//==============================================================
+enum InstrType
+{
+    R3,        // R-format: rd, rs, rt        (add, sub, and, or, slt, ...)
+    RSHIFT,    // R-format: rd, rt, shamt     (sll, srl, sra)
+    I_ARITH,   // I-format: rt, rs, imm       (addi, andi, ori, slti, ...)
+    I_LS,      // I-format: rt, offset(rs)    (lw, sw, lb, sb, ...)
+    I_BRANCH,  // I-format: rs, rt, label     (beq, bne)
+    JUMP,      // J-format: label             (j, jal)
+    NUM_INSTRTYPE,
+};
+
+struct InstrInfo
+{
+    InstrType type;
+    Opcode    opcode;  // 6-bit opcode field
+    Funct     funct;   // 6-bit funct field (R-type); 0 / FUNCT_NONE for non-R
+};
+
+
+static const std::vector<TokenType> PATTERNS[NUM_INSTRTYPE] = {
+    // R3: rd, rs, rt          e.g. add $t0, $t1, $t2
+    std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, REGISTER, EOL },
+
+    // RSHIFT: rd, rt, shamt   e.g. sll $t0, $t1, 4
+    std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, INT, EOL },
+
+    // I_ARITH: rt, rs, imm    e.g. addi $t0, $t1, 42
+    std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, INT, EOL },
+
+    // I_LS: rt, offset(rs)    e.g. lw $t0, 4($t1)
+    std::vector<TokenType>{ REGISTER, COMMA, INT, LPAREN, REGISTER, RPAREN, EOL },
+
+    // I_BRANCH: rs, rt, label e.g. beq $t0, $t1, LOOP
+    std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, IDENTIFIER, EOL },
+
+    // JUMP: label             e.g. j LOOP
+    std::vector<TokenType>{ IDENTIFIER, EOL },
+};
+
+const std::unordered_map<std::string, uint8_t> REG_TABLE = {
+    {"$zero", 0}, {"$0", 0},
+
+    {"$at",   1}, {"$1",  1},
+
+    {"$v0",   2}, {"$2",  2},
+    {"$v1",   3}, {"$3",  3},
+
+    {"$a0",   4}, {"$4",  4},
+    {"$a1",   5}, {"$5",  5},
+    {"$a2",   6}, {"$6",  6},
+    {"$a3",   7}, {"$7",  7},
+
+    {"$t0",   8}, {"$8",  8},
+    {"$t1",   9}, {"$9",  9},
+    {"$t2",  10}, {"$10",10},
+    {"$t3",  11}, {"$11",11},
+    {"$t4",  12}, {"$12",12},
+    {"$t5",  13}, {"$13",13},
+    {"$t6",  14}, {"$14",14},
+    {"$t7",  15}, {"$15",15},
+
+    {"$s0",  16}, {"$16",16},
+    {"$s1",  17}, {"$17",17},
+    {"$s2",  18}, {"$18",18},
+    {"$s3",  19}, {"$19",19},
+    {"$s4",  20}, {"$20",20},
+    {"$s5",  21}, {"$21",21},
+    {"$s6",  22}, {"$22",22},
+    {"$s7",  23}, {"$23",23},
+
+    {"$t8",  24}, {"$24",24},
+    {"$t9",  25}, {"$25",25},
+
+    {"$k0",  26}, {"$26",26},
+    {"$k1",  27}, {"$27",27},
+
+    {"$gp",  28}, {"$28",28},
+    {"$sp",  29}, {"$29",29},
+
+    {"$fp",  30}, {"$s8",30}, {"$30",30},
+
+    {"$ra",  31}, {"$31",31},
+};
+
+const char * REGISTER_NAMES[32] = {
+    "$zero", // 0
+    "$at",   // 1
+    "$v0",   // 2
+    "$v1",   // 3
+    "$a0",   // 4
+    "$a1",   // 5
+    "$a2",   // 6
+    "$a3",   // 7
+    "$t0",   // 8
+    "$t1",   // 9
+    "$t2",   // 10
+    "$t3",   // 11
+    "$t4",   // 12
+    "$t5",   // 13
+    "$t6",   // 14
+    "$t7",   // 15
+    "$s0",   // 16
+    "$s1",   // 17
+    "$s2",   // 18
+    "$s3",   // 19
+    "$s4",   // 20
+    "$s5",   // 21
+    "$s6",   // 22
+    "$s7",   // 23
+    "$t8",   // 24
+    "$t9",   // 25
+    "$k0",   // 26
+    "$k1",   // 27
+    "$gp",   // 28
+    "$sp",   // 29
+    "$fp",   // 30 (aka $s8)
+    "$ra"    // 31
+};
+
+inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
+    //==========================================================
+    // R-type arithmetic / logical: rd, rs, rt   (R3)
+    //==========================================================
+    { "add",   { R3,      OP_RTYPE, FUNCT_ADD   } },
+    { "addu",  { R3,      OP_RTYPE, FUNCT_ADDU  } },
+    { "sub",   { R3,      OP_RTYPE, FUNCT_SUB   } },
+    { "subu",  { R3,      OP_RTYPE, FUNCT_SUBU  } },
+    { "and",   { R3,      OP_RTYPE, FUNCT_AND   } },
+    { "or",    { R3,      OP_RTYPE, FUNCT_OR    } },
+    { "xor",   { R3,      OP_RTYPE, FUNCT_XOR   } },
+    { "nor",   { R3,      OP_RTYPE, FUNCT_NOR   } },
+    { "slt",   { R3,      OP_RTYPE, FUNCT_SLT   } },
+    { "sltu",  { R3,      OP_RTYPE, FUNCT_SLTU  } },
+    { "seq",   { R3,      OP_RTYPE, FUNCT_SEQ   } }, // pseudo-ish set-equal
+
+    // Multiply / divide to hi/lo
+    { "mult",  { R3,      OP_RTYPE, FUNCT_MULT  } },
+    { "multu", { R3,      OP_RTYPE, FUNCT_MULTU } },
+    { "div",   { R3,      OP_RTYPE, FUNCT_DIV   } },
+    { "divu",  { R3,      OP_RTYPE, FUNCT_DIVU  } },
+
+    // Moves to/from hi/lo (one register operand)
+    { "mfhi",  { R3,      OP_RTYPE, FUNCT_MFHI  } },
+    { "mflo",  { R3,      OP_RTYPE, FUNCT_MFLO  } },
+    { "mthi",  { R3,      OP_RTYPE, FUNCT_MTHI  } },
+    { "mtlo",  { R3,      OP_RTYPE, FUNCT_MTLO  } },
+
+    //==========================================================
+    // R-type shifts with shamt: rd, rt, shamt   (RSHIFT)
+    //==========================================================
+    { "sll",   { RSHIFT,  OP_RTYPE, FUNCT_SLL   } },
+    { "srl",   { RSHIFT,  OP_RTYPE, FUNCT_SRL   } },
+    { "sra",   { RSHIFT,  OP_RTYPE, FUNCT_SRA   } },
+
+    // Variable shifts: rd, rs, rt   (you may later give them their own type)
+    { "sllv",  { R3,      OP_RTYPE, FUNCT_SLLV  } },
+    { "srlv",  { R3,      OP_RTYPE, FUNCT_SRLV  } },
+    { "srav",  { R3,      OP_RTYPE, FUNCT_SRAV  } },
+
+    //==========================================================
+    // R-type jumps / syscall
+    //==========================================================
+    { "jr",    { JUMP,    OP_RTYPE, FUNCT_JR    } },   // jr rs
+    { "jalr",  { JUMP,    OP_RTYPE, FUNCT_JALR  } },   // jalr rd, rs (you can fix type later)
+    { "syscall",{ R3,     OP_RTYPE, FUNCT_SYSCALL } }, // no explicit operands
+
+    //==========================================================
+    // I-type arithmetic / logical: rt, rs, imm   (I_ARITH)
+    //==========================================================
+    { "addi",  { I_ARITH, OP_ADDI,  FUNCT_NONE  } },
+    { "addiu", { I_ARITH, OP_ADDIU, FUNCT_NONE  } },
+    { "andi",  { I_ARITH, OP_ANDI,  FUNCT_NONE  } },
+    { "ori",   { I_ARITH, OP_ORI,   FUNCT_NONE  } },
+    { "xori",  { I_ARITH, OP_XORI,  FUNCT_NONE  } },
+    { "slti",  { I_ARITH, OP_SLTI,  FUNCT_NONE  } },
+    { "sltiu", { I_ARITH, OP_SLTIU, FUNCT_NONE  } },
+    { "lui",   { I_ARITH, OP_LUI,   FUNCT_NONE  } },   // rt, imm (rs = $zero)
+
+    //==========================================================
+    // I-type load/store: rt, offset(rs)         (I_LS)
+    //==========================================================
+    { "lw",    { I_LS,    OP_LW,    FUNCT_NONE  } },
+    { "sw",    { I_LS,    OP_SW,    FUNCT_NONE  } },
+    { "lb",    { I_LS,    OP_LB,    FUNCT_NONE  } },
+    { "lbu",   { I_LS,    OP_LBU,   FUNCT_NONE  } },
+    { "lh",    { I_LS,    OP_LH,    FUNCT_NONE  } },
+    { "lhu",   { I_LS,    OP_LHU,   FUNCT_NONE  } },
+    { "sb",    { I_LS,    OP_SB,    FUNCT_NONE  } },
+    { "sh",    { I_LS,    OP_SH,    FUNCT_NONE  } },
+    
+    //==========================================================
+    // I-type branches
+    //   - two-register: rs, rt, label          (I_BRANCH)
+    //   - one-register: rs, label              (still I_BRANCH for now)
+    //==========================================================
+    { "beq",   { I_BRANCH,OP_BEQ,   FUNCT_NONE  } },
+    { "bne",   { I_BRANCH,OP_BNE,   FUNCT_NONE  } },
+    { "bgtz",  { I_BRANCH,OP_BGTZ,  FUNCT_NONE  } },   // rs, label
+    { "blez",  { I_BRANCH,OP_BLEZ,  FUNCT_NONE  } },   // rs, label
+
+    //==========================================================
+    // Jumps (J-format): label                  (JUMP)
+    //==========================================================
+    { "j",     { JUMP,    OP_J,     FUNCT_NONE  } },
+    { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } }
 };
 
 // text segment bounds
