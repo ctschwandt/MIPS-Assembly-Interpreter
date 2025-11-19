@@ -435,6 +435,49 @@ public:
 
                 break;
             }
+
+            case SYSCALL:
+            {
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+                uint32_t funct = static_cast<uint32_t>(info.funct);
+
+                word = (op << 26) |
+                    (0u << 21) |
+                    (0u << 16) |
+                    (0u << 11) |
+                    (0u <<  6) |
+                    (funct);
+
+                words.push_back(word);
+                break;
+            }
+
+            case JR_JALR: // jr rs   OR   jalr rs
+            {
+                // Pattern: REGISTER, EOL
+                uint32_t rs = parse_register(toks[j++], line);
+
+                uint32_t op    = static_cast<uint32_t>(info.opcode); // OP_RTYPE = 0
+                uint32_t funct = static_cast<uint32_t>(info.funct);
+
+                // jr:   rd = 0
+                // jalr: rd = $ra (31), since you're using "jalr rs" syntax
+                uint32_t rd = 0u;
+                if (funct == static_cast<uint32_t>(FUNCT_JALR))
+                {
+                    rd = 31u; // $ra
+                }
+
+                word = (op    << 26) |
+                    (rs    << 21) |  // jump target register
+                    (0u    << 16) |  // rt = 0
+                    (rd    << 11) |  // 0 for jr, 31 for jalr
+                    (0u    <<  6) |  // shamt = 0
+                    (funct <<  0);
+
+                words.push_back(word);
+                break;
+            }
             
             default:
                 throw std::runtime_error("Unknown instruction pattern");

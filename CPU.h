@@ -23,7 +23,7 @@ class CPU
 public:
     // CPU holds a reference to the machine's memory
     CPU(Memory & m)
-        : regs(), mem(m), pc(TEXT_BASE)
+        : regs(), mem(m), pc(TEXT_BASE), halted(false)
     {}
 
     void reset()
@@ -318,6 +318,160 @@ public:
                     {
                         // lo = rs
                         regs.write_loU(regs.readU(rs));
+                        break;
+                    }
+
+                    //===========================
+                    // Jumps via register
+                    //===========================
+                    case FUNCT_JR: // jr rs
+                    {
+                        // set pc to rs
+                        uint8_t rs  = (word >> 21) & mask_bits(5);
+                        pc = regs.readU(rs);
+                        break;
+                    }
+
+                    case FUNCT_JALR: // jalr rs
+                    {
+                        // set ra to pc
+                        uint32_t ra = pc;
+                        regs.writeU(31, ra);
+
+                        uint8_t rs  = (word >> 21) & mask_bits(5);
+                        pc = regs.readU(rs);
+                        break;
+                    }
+
+                    case FUNCT_SYSCALL:
+                    {
+                        uint32_t service_code = regs.readU(2);
+                        
+                        switch(service_code)
+                        {
+                            //--------------------------------------
+                            // 1: print integer ($a0)
+                            //--------------------------------------
+                            case 1:
+                            {
+                                std::cout << "executing sys1" << std::endl;
+                                int32_t value = regs.readS(4); // $a0
+                                std::cout << value;
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 4: print string ($a0 = addr)
+                            //--------------------------------------
+                            case 4:
+                            {
+                                uint32_t addr = regs.readU(4); // $a0
+
+                                while (true)
+                                {
+                                    uint8_t byte = mem.load8(addr);
+                                    if (byte == 0)    // null terminator
+                                        break;
+                                    std::cout << static_cast<char>(byte);
+                                    ++addr;
+                                }
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 5: read integer -> $v0
+                            //--------------------------------------
+                            case 5:
+                            {
+                                int32_t value;
+                                std::cout << "CONSOLE INTEGER INPUT> ";
+                                std::cin >> value;
+
+                                if (std::cin.peek() == '\n')
+                                    std::cin.get();
+                                
+                                regs.writeU(2, static_cast<uint32_t>(value)); // store into $v0
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 8: read string
+                            //     $a0 = buffer address
+                            //     $a1 = max chars
+                            //--------------------------------------
+                            case 8:
+                            {
+                                uint32_t buf_addr = regs.readU(4); // $a0
+                                uint32_t max_len  = regs.readU(5); // $a1
+
+                                std::cout << "CONSOLE STRING INPUT> ";
+
+                                // Read a line from stdin.
+                                // First flush leftover newline if needed.
+                                if (std::cin.peek() == '\n')
+                                    std::cin.get();
+
+                                std::string line;
+                                std::getline(std::cin, line);
+
+                                // SPIM behavior: store at most max_len-1 chars,
+                                // and null-terminate. (Optionally include '\n' if you want.)
+                                if (max_len == 0)
+                                    break; // nothing we can store
+
+                                if (line.size() >= max_len)
+                                    line.resize(max_len - 1);
+
+                                // Copy into memory
+                                uint32_t addr = buf_addr;
+                                for (std::size_t i = 0; i < line.size(); ++i)
+                                {
+                                    mem.store8(addr++, static_cast<uint8_t>(line[i]));
+                                }
+                                // null terminator
+                                mem.store8(addr, 0);
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 10: exit
+                            //--------------------------------------
+                            case 10:
+                            {
+                                halted = true;
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 11: print character ($a0)
+                            //--------------------------------------
+                            case 11:
+                            {
+                                uint32_t v = regs.readU(4); // $a0
+                                char c = static_cast<char>(v & 0xFF);
+                                std::cout << c;
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // 12: read character -> $v0
+                            //--------------------------------------
+                            case 12:
+                            {
+                                char c;
+                                std::cout << "CONSOLE INTEGER INPUT> ";
+                                std::cin.get(c);
+                                regs.writeU(2, static_cast<uint32_t>(
+                                                static_cast<unsigned char>(c)));
+                                break;
+                            }
+
+                            //--------------------------------------
+                            // Not implemented / unknown syscall
+                            //--------------------------------------
+                            default:
+                                throw std::runtime_error("Unknown or unimplemented syscall code in $v0");
+                        }
                         break;
                     }
 
@@ -683,6 +837,7 @@ public:
     RegisterFile regs;
     Memory & mem;
     uint32_t pc;
+    bool halted;
 };
 
 #endif // CPU_H

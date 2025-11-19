@@ -14,7 +14,6 @@
 enum Opcode : uint8_t
 {
     OP_RTYPE = 0x00,  // SPECIAL (R-type)
-
     OP_REGIMM = 0x01, // bgez, bltz
     
     OP_J     = 0x02,  // j
@@ -61,8 +60,8 @@ enum Funct : uint8_t
     FUNCT_SRAV  = 0x07,
 
     // jumps via register
-    FUNCT_JR    = 0x08,
-    FUNCT_JALR  = 0x09,
+    FUNCT_JR    = 0b001000,
+    FUNCT_JALR  = 0b001001,
 
     // syscall / break
     FUNCT_SYSCALL = 0x0C,
@@ -104,7 +103,9 @@ enum InstrType
     I_LS,      // I-format: rt, offset(rs)    (lw, sw, lb, sb, ...)
     I_BRANCH,  // I-format: rs, rt, label     (beq, bne)
     JUMP,      // J-format: label             (j, jal)
-    NUM_INSTRTYPE,
+    SYSCALL,   // R-format: syscall
+    JR_JALR,   // R3: jr rs, jalr rs
+    NUM_INSTRTYPE, 
 };
 
 struct InstrInfo
@@ -115,7 +116,7 @@ struct InstrInfo
 };
 
 
-static const std::vector<TokenType> PATTERNS[NUM_INSTRTYPE] = {
+static const std::vector< TokenType > PATTERNS[NUM_INSTRTYPE] = {
     // R3: rd, rs, rt          e.g. add $t0, $t1, $t2
     std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, REGISTER, EOL },
 
@@ -133,6 +134,12 @@ static const std::vector<TokenType> PATTERNS[NUM_INSTRTYPE] = {
 
     // JUMP: label             e.g. j LOOP
     std::vector<TokenType>{ IDENTIFIER, EOL },
+
+    // SYSCALL: syscall
+    std::vector< TokenType > { EOL },
+
+    // JR_JALR:
+    std::vector< TokenType > { REGISTER, EOL }
 };
 
 const std::unordered_map<std::string, uint8_t> REG_TABLE = {
@@ -255,12 +262,12 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     { "srlv",  { R3,      OP_RTYPE, FUNCT_SRLV  } },
     { "srav",  { R3,      OP_RTYPE, FUNCT_SRAV  } },
 
+     //==========================================================
+    // Specials: SYSCALL, JR_JALR
     //==========================================================
-    // R-type jumps / syscall
-    //==========================================================
-    { "jr",    { JUMP,    OP_RTYPE, FUNCT_JR    } },   // jr rs
-    { "jalr",  { JUMP,    OP_RTYPE, FUNCT_JALR  } },   // jalr rd, rs (you can fix type later)
-    { "syscall",{ R3,     OP_RTYPE, FUNCT_SYSCALL } }, // no explicit operands
+    { "jr",     { JR_JALR,    OP_RTYPE,     FUNCT_JR  } },
+    { "jalr",   { JR_JALR,    OP_RTYPE,     FUNCT_JALR  } },
+    { "syscall", { SYSCALL,     OP_RTYPE, FUNCT_SYSCALL } }, // no explicit operands
 
     //==========================================================
     // I-type arithmetic / logical: rt, rs, imm   (I_ARITH)
@@ -300,7 +307,7 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     // Jumps (J-format): label                  (JUMP)
     //==========================================================
     { "j",     { JUMP,    OP_J,     FUNCT_NONE  } },
-    { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } }
+    { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } },
 };
 
 // text segment bounds

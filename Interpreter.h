@@ -21,8 +21,8 @@
 /*
   todo:
   - r format instructions
-    - other R-type: jr, jalr, syscall
-
+    - other R-type: jr, jalr
+    
   - j format instructions
     - JUMP: b
 
@@ -33,6 +33,9 @@
   - add things to data segment (.word, .asciiz, etc)
     -- need some function that handles assembly directives. the parser
        does not look at those lines
+
+  - user can save to file
+  - can run assembly file
 
   - segment display handles strange chars (\0, \n, etc)
 
@@ -222,7 +225,9 @@ public:
 
                 out << "Error: " << e.what() << "\n";
             }
+            quit = machine.cpu.halted;
         }
+        std::cout << "exiting..." << std::endl;
     }
 
     // load a file and assemble it in batch (non-interactive) mode
@@ -284,7 +289,6 @@ private:
         }
         else if (is_cmd(line, "exit") || is_cmd(line, "quit"))
         {
-            std::cout << "exiting...\n";
             quit = true;
         }
         else
