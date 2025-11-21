@@ -414,10 +414,9 @@ public:
                                 std::string line;
                                 std::getline(std::cin, line);
 
-                                // SPIM behavior: store at most max_len-1 chars,
-                                // and null-terminate. (Optionally include '\n' if you want.)
+                                // SPIM behavior: store at most max_len-1 chars
                                 if (max_len == 0)
-                                    break; // nothing we can store
+                                    break; // store nothing
 
                                 if (line.size() >= max_len)
                                     line.resize(max_len - 1);

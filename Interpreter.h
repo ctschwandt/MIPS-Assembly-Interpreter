@@ -38,6 +38,7 @@
   - can run assembly file
 
   - segment display handles strange chars (\0, \n, etc)
+  - make it to where it jumps straight to main
 
   dr liow feature list:
   - The user can enter SPIM instruction and data at the prompt.
@@ -58,7 +59,7 @@
 // Small helpers
 //==============================================================
 inline
-std::string trim_copy(const std::string& s)
+std::string trim_copy(const std::string & s)
 {
     std::size_t start = 0;
     while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start])))
