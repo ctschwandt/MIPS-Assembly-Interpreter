@@ -19,17 +19,6 @@
 #include "Parser.h"
 
 /*
-  todo:
-  - r format instructions
-    - other R-type: jr, jalr
-    
-  - j format instructions
-    - JUMP: b
-
-  - handle pseudoinstructions
-    - move, li, la, lw (with label),
-      blt, ble, bgt, bge
-
   - add things to data segment (.word, .asciiz, etc)
     -- need some function that handles assembly directives. the parser
        does not look at those lines
@@ -214,8 +203,10 @@ public:
                         out << "Execution paused: unresolved labels remain.\n";          
                     }
                 }
-                else
+                else // in data mode
                 {
+                    // data doesn't insert encoded instructions.
+                    // it inserts things to the data segment
                     //assemble_data_line(line);
                 }
             }

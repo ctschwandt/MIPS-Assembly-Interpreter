@@ -115,6 +115,31 @@ struct InstrInfo
     Funct     funct;   // 6-bit funct field (R-type); 0 / FUNCT_NONE for non-R
 };
 
+enum PseudoType
+{
+    // Arithmetic / logical
+    ABS,    // abs   rd, rs
+    NEG,    // neg   rd, rs
+    NEGU,   // negu  rd, rs
+    NOT,    // not   rd, rs
+
+    // Set-on-compare pseudos
+    SGE,    // sge   rd, rs, rt
+    SGT,    // sgt   rd, rs, rt
+
+    // Branch pseudo-ops
+    BLT,    // blt   rs, rt, label
+    BLE,    // ble   rs, rt, label
+    BGT,    // bgt   rs, rt, label
+    BGE,    // bge   rs, rt, label
+    B,      // b label
+
+    // Load/Move pseudos
+    LI,         // li    rt, imm32
+    LA,         // la    rt, label
+    MOVE,       // move  rd, rs
+    LW_LABEL    // lw    rt, label   (i.e., lw with label instead of offset(base))
+};
 
 static const std::vector< TokenType > PATTERNS[NUM_INSTRTYPE] = {
     // R3: rd, rs, rt          e.g. add $t0, $t1, $t2
@@ -309,6 +334,28 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     { "j",     { JUMP,    OP_J,     FUNCT_NONE  } },
     { "jal",   { JUMP,    OP_JAL,   FUNCT_NONE  } },
 };
+
+inline const std::unordered_map<std::string, PseudoType> PSEUDO_TABLE = {
+    { "abs",  ABS  },
+    { "neg",  NEG  },
+    { "negu", NEGU },
+    { "not",  NOT  },
+
+    { "sge",  SGE  },
+    { "sgt",  SGT  },
+
+    { "blt",  BLT  },
+    { "ble",  BLE  },
+    { "bgt",  BGT  },
+    { "bge",  BGE  },
+    { "b",    B    },
+
+    { "li",   LI   },
+    { "la",   LA   },
+    { "move", MOVE }
+    // LW_LABEL is based off pattern, not instruction name
+};
+
 
 // text segment bounds
 static const uint32_t TEXT_BASE  = 0x00400000;
