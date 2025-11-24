@@ -19,10 +19,7 @@
 #include "Parser.h"
 
 /*
-  - add things to data segment (.word, .asciiz, etc)
-    -- need some function that handles assembly directives. the parser
-       does not look at those lines
-
+  todo:
   - user can save to file
   - can run assembly file
 
@@ -69,17 +66,53 @@ bool is_cmd(const std::string & line, const char * cmd)
 }
 
 inline
-std::string char_value_str(uint32_t val)
+std::string char_value_str(uint32_t u)
 {
-    unsigned char c = static_cast<unsigned char>(val & 0xFF);
-    if (std::isprint(c))
+    auto show_char = [](uint8_t c) -> std::string
     {
-        return std::string("'") + static_cast<char>(c) + "'";
-    }
-    else
+        switch (c)
+        {
+            case '\n': return "\\n";
+            case '\t': return "\\t";
+            case '\r': return "\\r";
+            case '\0': return "\\0";
+            case '\"': return "\\\"";
+            case '\\': return "\\\\";
+            default:
+                if (c >= 32 && c < 127)
+                {
+                    // printable ASCII
+                    return std::string(1, static_cast<char>(c));
+                }
+                else
+                {
+                    // non-printable; you could also use hex here
+                    return ".";
+                }
+        }
+    };
+
+    auto pad2 = [](const std::string & s) -> std::string
     {
-        return "'.'";
-    }
+        if (s.size() >= 2)
+            return s.substr(0, 2);
+        return s + std::string(2 - s.size(), ' ');
+    };
+
+    uint8_t b0 = static_cast<uint8_t>((u >> 24) & 0xFF);
+    uint8_t b1 = static_cast<uint8_t>((u >> 16) & 0xFF);
+    uint8_t b2 = static_cast<uint8_t>((u >> 8)  & 0xFF);
+    uint8_t b3 = static_cast<uint8_t>( u        & 0xFF);
+
+    std::string s;
+    s.reserve(11); // "xx xx xx xx"
+
+    s += pad2(show_char(b0)); s += ' ';
+    s += pad2(show_char(b1)); s += ' ';
+    s += pad2(show_char(b2)); s += ' ';
+    s += pad2(show_char(b3));
+
+    return s;
 }
 
 inline
@@ -184,6 +217,8 @@ public:
 
             try
             {
+                // make it where it it says what labels are undefined,
+                // and say when it continues execution
                 if (machine.in_text_mode)
                 {
                     // assemble instruction(s) into text segment
@@ -207,7 +242,7 @@ public:
                 {
                     // data doesn't insert encoded instructions.
                     // it inserts things to the data segment
-                    //assemble_data_line(line);
+                    assemble_data_line(line);
                 }
             }
             catch (const std::exception & e)
@@ -438,6 +473,16 @@ private:
             machine.emit_text_word(word);
         }
     }
+
+    void assemble_data_line(const std::string & line)
+    {
+        std::vector< Token > toks;
+        lexer.lex_core(toks, line, line_number);
+        println_toks_detail(toks, line);
+        uint32_t line_pc = machine.data_cursor;
+        parser.assemble_data_line(toks, line, line_pc);
+    }
+        
 };
 
 #endif // INTERPRETER_H

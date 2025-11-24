@@ -118,19 +118,19 @@ public:
 
     // print all mapped 32-bit words in [start, limit) in a table
     void print_region(std::ostream & out,
-                     uint32_t start,
-                     uint32_t limit,
-                     const char * title) const
+                      uint32_t start,
+                      uint32_t limit,
+                      const char * title) const
     {
         out << std::setfill('=') << std::setw(65) << '\n';
         out << title << '\n';
         out << std::setw(65) << '\n';
 
         out << std::setfill(' ')
-            << std::setw(12) << "addr (int)"  << '|'
-            << std::setw(12) << "addr (hex)"  << '|'
-            << std::setw(12) << "value (int)" << '|'
-            << std::setw(12) << "value (hex)" << '|'
+            << std::setw(12) << "addr (int)"   << '|'
+            << std::setw(12) << "addr (hex)"   << '|'
+            << std::setw(12) << "value (int)"  << '|'
+            << std::setw(12) << "value (hex)"  << '|'
             << std::setw(12) << "value (char)" << '\n';
 
         out << std::setfill('-')
@@ -141,9 +141,37 @@ public:
             << std::setw(13) << '\n';
         out << std::setfill(' ');
 
-        auto printable = [](uint8_t c) -> char
+        // map a byte to a string representation (including escapes)
+        auto show_char = [](uint8_t c) -> std::string
         {
-            return (c >= 32 && c < 127) ? static_cast<char>(c) : '.';
+            switch (c)
+            {
+                case '\n': return "\\n";
+                case '\t': return "\\t";
+                case '\r': return "\\r";
+                case '\0': return "\\0";
+                case '\"': return "\\\"";
+                case '\\': return "\\\\";
+                default:
+                    if (c >= 32 && c < 127)
+                    {
+                        // printable ASCII
+                        return std::string(1, static_cast<char>(c));
+                    }
+                    else
+                    {
+                        // non-printable; you could also show hex here
+                        return ".";
+                    }
+            }
+        };
+
+        // pad/truncate to exactly 2 characters for each "cell"
+        auto pad2 = [](const std::string & s) -> std::string
+        {
+            if (s.size() >= 2)
+                return s.substr(0, 2);
+            return s + std::string(2 - s.size(), ' ');
         };
 
         // collect unique aligned word addresses in [start, limit)
@@ -177,7 +205,7 @@ public:
         }
         else
         {
-            // Print in ascending address order (matches your data example)
+            // Print in ascending address order
             for (uint32_t addr : word_addrs)
             {
                 uint32_t w = load32(addr);
@@ -196,25 +224,25 @@ public:
                 // value (int) – signed
                 out << std::setw(12) << static_cast<int32_t>(w) << '|';
 
-                // value (hex) – 4 bytes like "48 65 6c 6c"
+                // value (hex) – each byte 2 hex digits (zero-padded)
                 {
                     std::ostringstream hex_ss;
-                    hex_ss << std::hex
-                           << std::nouppercase
-                           << static_cast<unsigned>(b0) << ' '
-                           << static_cast<unsigned>(b1) << ' '
-                           << static_cast<unsigned>(b2) << ' '
-                           << static_cast<unsigned>(b3);
+                    hex_ss << std::hex << std::nouppercase << std::setfill('0')
+                           << std::setw(2) << static_cast<unsigned>(b0) << ' '
+                           << std::setw(2) << static_cast<unsigned>(b1) << ' '
+                           << std::setw(2) << static_cast<unsigned>(b2) << ' '
+                           << std::setw(2) << static_cast<unsigned>(b3);
                     out << std::setw(12) << hex_ss.str() << '|';
                 }
 
-                // value (char) – 4 chars separated by spaces
+                // value (char) – 4 "cells" of width 2, separated by spaces
                 {
                     std::string chars;
-                    chars += printable(b0); chars += ' ';
-                    chars += printable(b1); chars += ' ';
-                    chars += printable(b2); chars += ' ';
-                    chars += printable(b3);
+                    chars += pad2(show_char(b0)); chars += ' ';
+                    chars += pad2(show_char(b1)); chars += ' ';
+                    chars += pad2(show_char(b2)); chars += ' ';
+                    chars += pad2(show_char(b3));
+
                     out << std::setw(12) << chars << '\n';
                 }
             }

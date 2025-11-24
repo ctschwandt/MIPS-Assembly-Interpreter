@@ -52,7 +52,7 @@ public:
         jump_fixups.clear();
 
         // init stack pointer
-        cpu.regs.writeU(29, STACK_BASE);
+        cpu.regs.writeU(29, STACK_INIT);
     }
 
     void define_label(const std::string & name, uint32_t addr)
@@ -142,28 +142,17 @@ public:
     // append a sequence of bytes to the data segment at data_cursor.
     void emit_data_bytes(const uint8_t * bytes, std::size_t n)
     {
-        if (data_cursor + n > DATA_LIMIT)
+        // bounds check
+        if (data_cursor + static_cast<uint32_t>(n) > DATA_LIMIT)
             throw std::runtime_error("emit_data_bytes: data segment overflow");
 
+        // write n bytes starting at current data_cursor
         for (std::size_t i = 0; i < n; ++i)
         {
             mem.store8(data_cursor + static_cast<uint32_t>(i), bytes[i]);
         }
+
         data_cursor += static_cast<uint32_t>(n);
-    }
-
-    // .word (32-bit, big-endian)
-    void emit_data_word(uint32_t value)
-    {
-        // ensure 4-byte alignment
-        if (data_cursor & 0x3)
-            throw std::runtime_error("emit_data_word: data_cursor not aligned");
-
-        if (data_cursor + 4 > DATA_LIMIT)
-            throw std::runtime_error("emit_data_word: data segment overflow");
-
-        mem.store32(data_cursor, value);
-        data_cursor += 4;
     }
 
     // .byte (single byte)
@@ -172,15 +161,48 @@ public:
         emit_data_bytes(&value, 1);
     }
 
-    // .asciiz (null-terminated string)
-    void emit_data_asciiz(const char* s)
+    // .word (32-bit word, stored via Memory::store32)
+    void emit_data_word(uint32_t value)
     {
-        // write characters including terminating '\0'
+        // enforce 4-byte alignment for .word
+        if (data_cursor & 0x3u)
+            throw std::runtime_error("emit_data_word: data_cursor not aligned");
+
+        if (data_cursor + 4u > DATA_LIMIT)
+            throw std::runtime_error("emit_data_word: data segment overflow");
+
+        mem.store32(data_cursor, value);
+        data_cursor += 4u;
+    }
+
+    // .half (16-bit, big-endian like SPIM)
+    void emit_data_half(uint16_t value)
+    {
+        // enforce 2-byte alignment
+        if (data_cursor & 0x1u)
+            throw std::runtime_error("emit_data_half: data_cursor not aligned");
+
+        if (data_cursor + 2u > DATA_LIMIT)
+            throw std::runtime_error("emit_data_half: data segment overflow");
+
+        // big-endian: high byte first
+        uint8_t hi = static_cast<uint8_t>((value >> 8) & 0xFFu);
+        uint8_t lo = static_cast<uint8_t>( value       & 0xFFu);
+
+        mem.store8(data_cursor,     hi);
+        mem.store8(data_cursor + 1, lo);
+
+        data_cursor += 2u;
+    }
+
+    // .asciiz (null-terminated string)
+    void emit_data_asciiz(const char * s)
+    {
+        // write characters including the final '\0'
         const char * p = s;
         while (*p)
         {
-            uint8_t c = static_cast<uint8_t>(*p);
-            emit_data_byte(c);
+            emit_data_byte(static_cast<uint8_t>(*p));
             ++p;
         }
         emit_data_byte(0); // terminating null

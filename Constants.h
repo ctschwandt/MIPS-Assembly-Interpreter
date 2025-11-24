@@ -363,11 +363,12 @@ static const uint32_t TEXT_LIMIT = 0x10000000; // just before data
 
 // data segment bounds
 static const uint32_t DATA_BASE  = 0x10000000;
-static const uint32_t DATA_LIMIT = 0x10040000; // from your notes
+static const uint32_t DATA_LIMIT = 0x10040000;
 
 // stack
-static const uint32_t STACK_BASE = 0x7fffeffc; // initial $sp
-static const uint32_t STACK_LIMIT= 0x80000000; // top of stack region (exclusive)
+static const uint32_t STACK_BASE = DATA_LIMIT;  // bottom of stack region (just above data)
+static const uint32_t STACK_LIMIT = 0x80000000;  // top (exclusive)
+static const uint32_t STACK_INIT = 0x7fffeffc;  // initial $sp
 
 #endif
 

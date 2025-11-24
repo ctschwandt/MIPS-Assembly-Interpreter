@@ -212,6 +212,48 @@ public:
         return static_cast<uint8_t>(v);
     }
 
+    static std::string parse_string_literal(const Token & tok, const std::string & line)
+    {
+        std::string raw = tok.get_string(line); // currently something like: "Hello\n"
+
+        // strip outer quotes if your lexer leaves them in
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+            raw = raw.substr(1, raw.size() - 2);
+
+        std::string result;
+        result.reserve(raw.size());
+
+        for (std::size_t i = 0; i < raw.size(); ++i)
+        {
+            char c = raw[i];
+            if (c != '\\')
+            {
+                result.push_back(c);
+                continue;
+            }
+
+            // escape sequence
+            if (i + 1 >= raw.size())
+                throw std::runtime_error("Invalid escape at end of string literal");
+
+            char e = raw[++i];
+            switch (e)
+            {
+                case 'n': result.push_back('\n'); break;
+                case 't': result.push_back('\t'); break;
+                case '\\': result.push_back('\\'); break;
+                case '"': result.push_back('"'); break;
+                case 'r': result.push_back('\r'); break;
+                case '0': result.push_back('\0'); break;
+                default:
+                    // could allow unknown escapes as literal
+                    throw std::runtime_error(std::string("Unknown escape: \\") + e);
+            }
+        }
+
+        return result;
+    }
+
     void
     expand_pseudo(const std::vector<Token> & toks,
                           int mnem_index,
@@ -1146,6 +1188,246 @@ public:
         }
 
         return words;
+    }
+
+    void
+    assemble_data_line(const std::vector<Token> & toks,
+                       const std::string & line,
+                       uint32_t current_pc)
+    {
+        if (toks.empty())
+            return;
+
+        int i = 0;
+
+        // --------------------------------------------------------
+        // Optional LABEL: label:
+        // --------------------------------------------------------
+        if (toks[i].type == IDENTIFIER &&
+            i + 1 < static_cast<int>(toks.size()) &&
+            toks[i+1].type == COLON)
+        {
+            std::string label = toks[i].get_string(line);
+            machine.define_label(label, current_pc);
+            i += 2;
+        }
+
+        // label-only or empty line
+        if (i >= static_cast<int>(toks.size()) || toks[i].type == EOL)
+            return;
+
+        // Next token must be directive identifier
+        if (toks[i].type != IDENTIFIER)
+            throw std::runtime_error("Data line must start with a directive");
+
+        std::string dir = toks[i].get_string(line);
+        ++i;
+
+        auto error_here = [&](const std::string & msg)
+        {
+            throw std::runtime_error(msg + " in data line");
+        };
+
+        // --------------------------------------------------------
+        // .word v1 v2 v3 ...
+        // --------------------------------------------------------
+        if (dir == ".word")
+        {
+            std::vector<uint32_t> values;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                if (toks[i].type != INT)
+                    error_here(".word expects integer operands");
+
+                int32_t sval = parse_imm32(toks[i], line);
+                uint32_t uval = static_cast<uint32_t>(sval);
+                values.push_back(uval);
+                ++i;
+            }
+
+            if (values.empty())
+                error_here(".word requires at least one integer");
+
+            // emit only after parsed successfully
+            for (uint32_t v : values)
+                machine.emit_data_word(v);
+        }
+        // --------------------------------------------------------
+        // .byte b1 b2 b3 ...
+        // --------------------------------------------------------
+        else if (dir == ".byte")
+        {
+            std::vector<uint8_t> bytes;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                if (toks[i].type != INT)
+                    error_here(".byte expects integer operands");
+
+                int64_t v = parse_int_token(toks[i], line);
+                uint8_t b = static_cast<uint8_t>(v & 0xFF);
+                bytes.push_back(b);
+                ++i;
+            }
+
+            if (bytes.empty())
+                error_here(".byte requires at least one integer");
+
+            for (uint8_t b : bytes)
+                machine.emit_data_byte(b);
+        }
+        // --------------------------------------------------------
+        // .half h1 h2 h3 ...
+        // --------------------------------------------------------
+        else if (dir == ".half")
+        {
+            std::vector<uint16_t> halves;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                if (toks[i].type != INT)
+                    error_here(".half expects integer operands");
+
+                int64_t v = parse_int_token(toks[i], line);
+                if (v < -32768 || v > 65535)
+                    error_here(".half operand out of 16-bit range");
+
+                // treat as unsigned 16 bits (SPIM style)
+                uint16_t h = static_cast<uint16_t>(v & 0xFFFF);
+                halves.push_back(h);
+                ++i;
+            }
+
+            if (halves.empty())
+                error_here(".half requires at least one integer");
+
+            for (uint16_t h : halves)
+                machine.emit_data_half(h);
+        }
+        // --------------------------------------------------------
+        // .ascii "string"
+        //  (no terminating '\0')
+        // --------------------------------------------------------
+        else if (dir == ".ascii")
+        {
+            if (i >= static_cast<int>(toks.size()) ||
+                toks[i].type != STRING)
+            {
+                error_here(".ascii expects a string literal");
+            }
+
+            std::string s = parse_string_literal(toks[i], line);
+            ++i;
+
+            // any extra non-EOL tokens = error
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                error_here("extra tokens after .ascii directive");
+            }
+
+            // emit bytes (no null terminator)
+            for (char c : s)
+                machine.emit_data_byte(static_cast<uint8_t>(c));
+        }
+        // --------------------------------------------------------
+        // .asciiz "string"
+        //  (null-terminated)
+        // --------------------------------------------------------
+        else if (dir == ".asciiz")
+        {
+            if (i >= static_cast<int>(toks.size()) ||
+                toks[i].type != STRING)
+            {
+                error_here(".asciiz expects a string literal");
+            }
+
+            std::string s = parse_string_literal(toks[i], line);
+            ++i;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                error_here("extra tokens after .asciiz directive");
+            }
+
+            machine.emit_data_asciiz(s.c_str());
+        }
+        // --------------------------------------------------------
+        // .space n  (reserve n zero bytes)
+        // --------------------------------------------------------
+        else if (dir == ".space")
+        {
+            if (i >= static_cast<int>(toks.size()) ||
+                toks[i].type != INT)
+            {
+                error_here(".space expects a single integer operand");
+            }
+
+            int64_t v = parse_int_token(toks[i], line);
+            if (v < 0)
+                error_here(".space size must be non-negative");
+
+            uint32_t n = static_cast<uint32_t>(v);
+            ++i;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                error_here("extra tokens after .space directive");
+            }
+
+            for (uint32_t k = 0; k < n; ++k)
+                machine.emit_data_byte(0);
+        }
+        // --------------------------------------------------------
+        // .align n  (align data_cursor to 2^n boundary)
+        // --------------------------------------------------------
+        else if (dir == ".align")
+        {
+            if (i >= static_cast<int>(toks.size()) ||
+                toks[i].type != INT)
+            {
+                error_here(".align expects a single integer operand");
+            }
+
+            int64_t v = parse_int_token(toks[i], line);
+            if (v < 0)
+                error_here(".align value must be non-negative");
+
+            // SPIM-style: argument is log2(alignment)
+            // e.g., .align 2 => align to 4-byte boundary
+            if (v > 31)
+                error_here(".align value too large");
+
+            uint32_t pow2 = 1u << static_cast<uint32_t>(v);
+            ++i;
+
+            while (i < static_cast<int>(toks.size()) &&
+                   toks[i].type != EOL)
+            {
+                error_here("extra tokens after .align directive");
+            }
+
+            // align current data_cursor to next multiple of pow2
+            uint32_t addr = machine.data_cursor;
+            uint32_t next = (addr + (pow2 - 1u)) & ~(pow2 - 1u);
+
+            // fill with zeros up to 'next'
+            while (machine.data_cursor < next)
+                machine.emit_data_byte(0);
+        }
+        // --------------------------------------------------------
+        // Unknown directive
+        // --------------------------------------------------------
+        else
+        {
+            error_here("Unknown data directive: " + dir);
+        }
     }
 
 private:
