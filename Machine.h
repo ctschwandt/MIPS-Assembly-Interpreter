@@ -50,6 +50,7 @@ public:
         labels.clear();
         branch_fixups.clear();
         jump_fixups.clear();
+        la_fixups_.clear();
 
         // init stack pointer
         cpu.regs.writeU(29, STACK_INIT);
@@ -96,11 +97,18 @@ public:
         std::string label;     // label to branch to
     };
 
-     struct JumpFixup
+    struct JumpFixup
     {
         uint32_t instr_addr;   // address of the j/jal instruction
         Opcode   opcode;       // OP_J or OP_JAL
         std::string label;     // label we jump to
+    };
+
+    struct LaFixup
+    {
+        uint32_t instr_addr;   // address of the LUI word (first word of la)
+        uint8_t  rt;           // destination register of the ORI
+        std::string label;     // label we’re waiting on
     };
 
     void add_branch_fixup(uint32_t instr_addr,
@@ -119,9 +127,20 @@ public:
         jump_fixups.push_back(JumpFixup{instr_addr, opcode, label});
     }
 
+    void add_la_fixup(uint32_t instr_addr,
+                      uint32_t rt,
+                      const std::string & label)
+    {
+        la_fixups_.push_back(LaFixup{instr_addr,
+                                     static_cast<uint8_t>(rt),
+                                     label});
+    }
+
     bool has_unresolved_fixups() const
     {
-        return !branch_fixups.empty() || !jump_fixups.empty();
+        return !branch_fixups.empty() ||
+               !jump_fixups.empty()   ||
+               !la_fixups_.empty();
     }
 
     // append a 32-bit instruction word to the text segment at the
@@ -257,12 +276,13 @@ public:
     CPU cpu;
     uint32_t text_cursor;   // next free address in text segment
     uint32_t data_cursor;   // next free address in data segment
-    bool in_text_mode;  // current assembly target (.text / .data)
+    bool in_text_mode;      // current assembly target (.text / .data)
     std::unordered_map< std::string, uint32_t > labels; // addresses of labels
 
 private:
     std::vector< BranchFixup > branch_fixups;
     std::vector< JumpFixup > jump_fixups;
+    std::vector< LaFixup >    la_fixups_;
 
     void resolve_fixups_for(const std::string & label)
     {
@@ -337,6 +357,38 @@ private:
 
             jump_fixups[i] = jump_fixups.back();
             jump_fixups.pop_back();
+        }
+
+        // --------- la (lui/ori for la rt,label) ---------
+        for (std::size_t i = 0; i < la_fixups_.size(); )
+        {
+            LaFixup & f = la_fixups_[i];
+            if (f.label != label)
+            {
+                ++i;
+                continue;
+            }
+
+            // split address into hi/lo
+            uint16_t hi = static_cast<uint16_t>((target_addr >> 16) & 0xFFFFu);
+            uint16_t lo = static_cast<uint16_t>( target_addr        & 0xFFFFu);
+
+            // first word: LUI at instr_addr
+            uint32_t lui_word = mem.load32(f.instr_addr);
+            // clear low 16 bits, insert hi
+            lui_word = (lui_word & 0xFFFF0000u) | hi;
+            mem.store32(f.instr_addr, lui_word);
+
+            // second word: ORI at instr_addr + 4
+            uint32_t ori_addr = f.instr_addr + 4u;
+            uint32_t ori_word = mem.load32(ori_addr);
+            // clear low 16 bits, insert lo
+            ori_word = (ori_word & 0xFFFF0000u) | lo;
+            mem.store32(ori_addr, ori_word);
+
+            // remove fixup (swap & pop)
+            la_fixups_[i] = la_fixups_.back();
+            la_fixups_.pop_back();
         }
     }
 };

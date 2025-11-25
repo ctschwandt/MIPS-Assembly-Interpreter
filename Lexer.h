@@ -267,20 +267,47 @@ public:
                 }
 
                 case IN_CHAR:
-                    // consume body: either escape or single char
+                {
+                    // enter IN_CHAR with:
+                    //   start = index of opening '
+                    //   i     = index of first char after opening '
+                    if (i >= n)
+                    {
+                        // nothing after ', unterminated char
+                        push_tok(ERROR, start, i);
+                        state() = DEFAULT;
+                        break;
+                    }
+
+                    // consume body: either a single char or an escape sequence
                     if (s[i] == '\\')
                     {
-                        i += (i + 1 < n ? 2 : 1);  // backslash + next char if present
+                        // escape sequence: backslash + one more char (if present)
+                        i += (i + 1 < n ? 2 : 1);
                     }
-                    
-                    // closing quote if present
-                    if (s[i] == '\'')
+                    else
+                    {
+                        // normal single char
                         ++i;
+                    }
 
-                    push_tok(INT, start, i);
+                    // now expect closing '
+                    if (i < n && s[i] == '\'')
+                    {
+                        ++i; // consume closing '
+                        // token text will be something like:  "'+'", "'\\n'", etc.
+                        push_tok(INT, start, i);
+                    }
+                    else
+                    {
+                        // no closing quote -> error token
+                        push_tok(ERROR, start, i);
+                    }
+
                     state() = DEFAULT;
                     break;
-                    
+                }
+
                 case IN_STRING:
                     if (s[i] == '\\') // ex: \n
                     {

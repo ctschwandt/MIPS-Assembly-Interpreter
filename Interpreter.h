@@ -13,6 +13,10 @@
 #include <string>
 #include <cctype>
 #include <stdexcept>
+#include <fstream>
+#include <iomanip>
+#include <vector>
+#include <cstring>
 
 #include "Machine.h"
 #include "Lexer.h"
@@ -20,13 +24,21 @@
 
 /*
   todo:
-  - user can save to file
-  - can run assembly file
+  - bug fixing on tic-tac-toe within sim:
+Enter row: CONSOLE INTEGER INPUT> 0
+Enter col: CONSOLE INTEGER INPUT> 0
++-+-+-+
+|X| | |
++-+-+-+
+| |O| |
++-+-+-+
+| | | |
++-+-+-+
+Runtime error: MIPS integer overflow on addu
 
-  - segment display handles strange chars (\0, \n, etc)
-  - make it to where it jumps straight to main
 
-  dr liow feature list:
+  
+  Features to support (Dr. Liow list):
   - The user can enter SPIM instruction and data at the prompt.
   - The user can load a SPIM program.
   - The simulator executes instruction and data input whenever possible. If an invalid instruction
@@ -37,9 +49,7 @@
   - [OPTIONAL] The user inserts breakpoints and singlestep/multi-step through the program.
   - [OPTIONAL] The user can set environment variables such as setting the verbosity of the
     simulator.
-  
-  bugs:
- */
+*/
 
 //==============================================================
 // Small helpers
@@ -63,6 +73,12 @@ inline
 bool is_cmd(const std::string & line, const char * cmd)
 {
     return (line == cmd);
+}
+
+inline
+bool starts_with(const std::string & s, const char * prefix)
+{
+    return s.rfind(prefix, 0) == 0; // prefix at position 0
 }
 
 inline
@@ -152,8 +168,17 @@ const char * uint_to_reg(unsigned i)
         "$fp",   // 30 (aka $s8)
         "$ra"    // 31
     };
-    return (0 <= i && i < 32) ? REGISTER_NAMES[i] : "??";
+    return (0 <= i && i < 32) ? names[i] : "??";
 }
+
+// One assembled source line in the interactive program
+struct SourceLine
+{
+    std::string text;      // original line ("li $s0, 1")
+    bool        in_text;   // true if assembled in text mode
+    uint32_t    pc_before; // text/data cursor before assembling this line
+    uint32_t    pc_after;  // text/data cursor after assembling this line
+};
 
 //==============================================================
 // Interpreter
@@ -211,18 +236,20 @@ public:
             }
 
             // otherwise: treat as assembly in current segment
-            
-            // remember old cursor so I can roll back on error
+
+            // remember old cursors so we can roll back on error
             uint32_t old_text_cursor = machine.text_cursor;
+            uint32_t old_data_cursor = machine.data_cursor;
 
             try
             {
-                // make it where it it says what labels are undefined,
-                // and say when it continues execution
                 if (machine.in_text_mode)
                 {
                     // assemble instruction(s) into text segment
                     assemble_text_line(line);
+
+                    // record successful text line in program history
+                    record_source_line_text(line, old_text_cursor);
 
                     if (!machine.has_unresolved_fixups())
                     {
@@ -235,40 +262,165 @@ public:
                     }
                     else
                     {
-                        out << "Execution paused: unresolved labels remain.\n";          
+                        out << "Execution paused: unresolved labels remain.\n";
                     }
                 }
                 else // in data mode
                 {
-                    // data doesn't insert encoded instructions.
-                    // it inserts things to the data segment
+                    // data inserts into the data segment only
                     assemble_data_line(line);
+                    record_source_line_data(line, old_data_cursor);
                 }
             }
             catch (const std::exception & e)
             {
-                // roll back the text cursor
-                machine.text_cursor = old_text_cursor;
+                // roll back the cursor on error
+                if (machine.in_text_mode)
+                {
+                    machine.text_cursor = old_text_cursor;
+                }
+                else
+                {
+                    machine.data_cursor = old_data_cursor;
+                }
 
                 out << "Error: " << e.what() << "\n";
             }
+
             quit = machine.cpu.halted;
         }
         std::cout << "exiting..." << std::endl;
     }
 
-    // load a file and assemble it in batch (non-interactive) mode
-    void load_file(const std::string & path);
+    // load a file and assemble it (non-interactive loader)
+    void load_file(const std::string & path)
+    {
+        std::ifstream in(path);
+        if (!in)
+        {
+            throw std::runtime_error("Could not open file: " + path);
+        }
+
+        std::string line;
+        while (std::getline(in, line))
+        {
+            std::string trimmed = trim_copy(line);
+            if (trimmed.empty())
+                continue;
+
+            // segment directives
+            if (is_cmd(trimmed, ".text"))
+            {
+                machine.in_text_mode = true;
+                continue;
+            }
+            if (is_cmd(trimmed, ".data"))
+            {
+                machine.in_text_mode = false;
+                continue;
+            }
+
+            // treat as assembly line
+            uint32_t old_text_cursor = machine.text_cursor;
+            uint32_t old_data_cursor = machine.data_cursor;
+
+            try
+            {
+                if (machine.in_text_mode)
+                {
+                    assemble_text_line(trimmed);
+                    record_source_line_text(trimmed, old_text_cursor);
+                }
+                else
+                {
+                    assemble_data_line(trimmed);
+                    record_source_line_data(trimmed, old_data_cursor);
+                }
+            }
+            catch (const std::exception &)
+            {
+                if (machine.in_text_mode)
+                    machine.text_cursor = old_text_cursor;
+                else
+                    machine.data_cursor = old_data_cursor;
+
+                throw; // let caller report the error
+            }
+        }
+    }
 
 private:
     Machine machine;
-    Lexer lexer;
-    Parser parser;
-    int line_number;
+    Lexer   lexer;
+    Parser  parser;
+    int     line_number;
 
-    //==========================================================
+    // all successfully assembled source lines (in order)
+    std::vector< SourceLine > program_;
+
+    //----------------------------------------------------------
+    // Program history helpers
+    //----------------------------------------------------------
+    void record_source_line_text(const std::string & line,
+                                 uint32_t pc_before)
+    {
+        SourceLine src;
+        src.text      = line;
+        src.in_text   = true;
+        src.pc_before = pc_before;
+        src.pc_after  = machine.text_cursor;
+        program_.push_back(src);
+    }
+
+    void record_source_line_data(const std::string & line,
+                                 uint32_t pc_before)
+    {
+        SourceLine src;
+        src.text      = line;
+        src.in_text   = false;
+        src.pc_before = pc_before;
+        src.pc_after  = machine.data_cursor;
+        program_.push_back(src);
+    }
+
+    void rebuild_from_program()
+    {
+        // Start from a clean machine state
+        machine.reset();
+
+        // Re-assemble every stored source line, without executing
+        for (const SourceLine & src : program_)
+        {
+            machine.in_text_mode = src.in_text;
+
+            if (src.in_text)
+            {
+                assemble_text_line(src.text);
+            }
+            else
+            {
+                assemble_data_line(src.text);
+            }
+        }
+    }
+
+    void save_program(const std::string & path)
+    {
+        std::ofstream out(path);
+        if (!out)
+        {
+            throw std::runtime_error("Could not open file for writing: " + path);
+        }
+
+        for (const SourceLine & src : program_)
+        {
+            out << src.text << '\n';
+        }
+    }
+
+    //----------------------------------------------------------
     // Command handling
-    //==========================================================
+    //----------------------------------------------------------
     bool is_command_line(const std::string & line) const
     {
         return  is_cmd(line, "?")      ||
@@ -279,8 +431,47 @@ private:
                 is_cmd(line, "data")   ||
                 is_cmd(line, "stack")  ||
                 is_cmd(line, "labels") ||
+                is_cmd(line, "save")   ||
+                starts_with(line, "read ") ||
+                starts_with(line, "load ") ||
                 is_cmd(line, "exit")   ||
                 is_cmd(line, "quit");
+    }
+
+    // parse filename after a command like:  read "file.s"
+    // supports:
+    //   read "foo.s"
+    //   read foo.s
+    std::string parse_filename_after_command(const std::string & line,
+                                             const char * cmd) const
+    {
+        std::size_t cmd_len = std::strlen(cmd);
+        if (line.size() < cmd_len)
+            return "";
+
+        std::size_t pos = cmd_len;
+        // skip spaces after command
+        while (pos < line.size() &&
+               std::isspace(static_cast<unsigned char>(line[pos])))
+        {
+            ++pos;
+        }
+
+        if (pos >= line.size())
+            return ""; // no filename
+
+        if (line[pos] == '"')
+        {
+            std::size_t end = line.find('"', pos + 1);
+            if (end == std::string::npos)
+                return ""; // no closing quote
+            return line.substr(pos + 1, end - (pos + 1));
+        }
+        else
+        {
+            std::string fname = line.substr(pos);
+            return trim_copy(fname);
+        }
     }
 
     void handle_command(const std::string & line, std::ostream & out, bool & quit)
@@ -314,6 +505,60 @@ private:
         {
             print_stack(out);
         }
+        else if (is_cmd(line, "save"))
+        {
+            try
+            {
+                // simple version: always save to "program.s"
+                const std::string filename = "program.s";
+                save_program(filename);
+                out << "Program saved to '" << filename << "'.\n";
+            }
+            catch (const std::exception & e)
+            {
+                out << "Save error: " << e.what() << "\n";
+            }
+        }
+        else if (starts_with(line, "read "))
+        {
+            std::string filename = parse_filename_after_command(line, "read");
+            if (filename.empty())
+            {
+                out << "Usage: read \"FILE\"\n";
+            }
+            else
+            {
+                try
+                {
+                    load_file(filename);
+                    out << "Read \"" << filename << "\".\n";
+                }
+                catch (const std::exception & e)
+                {
+                    out << "Read error: " << e.what() << "\n";
+                }
+            }
+        }
+        else if (starts_with(line, "load "))
+        {
+            std::string filename = parse_filename_after_command(line, "load");
+            if (filename.empty())
+            {
+                out << "Usage: load \"FILE\"\n";
+            }
+            else
+            {
+                try
+                {
+                    load_file(filename);
+                    out << "Loaded \"" << filename << "\".\n";
+                }
+                catch (const std::exception & e)
+                {
+                    out << "Load error: " << e.what() << "\n";
+                }
+            }
+        }
         else if (is_cmd(line, "exit") || is_cmd(line, "quit"))
         {
             quit = true;
@@ -327,16 +572,19 @@ private:
     void print_help(std::ostream & out) const
     {
         out << "Commands:\n"
-            << "  ?/help     - show this help\n"
-            << "  .text      - switch to text segment\n"
-            << "  .data      - switch to data segment\n"
-            << "  regs       - show register file\n"
-            << "  data       - show data segment in use\n"
-            << "  stack      - show stack segment in use\n"
-            << "  labels     - show all currently defined labels\n"
-            << "  run        - run program from TEXT_BASE to current text_cursor\n"
-            << "  reset      - reset machine (regs, pc, cursors, memory)\n"
-            << "  exit/quit  - quit interpreter\n";
+            << "  ?/help       - show this help\n"
+            << "  .text        - switch to text segment\n"
+            << "  .data        - switch to data segment\n"
+            << "  read \"FILE\" - read assembly file into memory\n"
+            << "  load \"FILE\" - same as read\n"
+            << "  regs         - show register file\n"
+            << "  data         - show data segment in use\n"
+            << "  stack        - show stack segment in use\n"
+            << "  labels       - show all currently defined labels\n"
+            << "  run          - rebuild from history and run from TEXT_BASE\n"
+            << "  save         - save interactive program to program.s\n"
+            << "  reset        - reset machine (regs, pc, cursors, memory)\n"
+            << "  exit/quit    - quit interpreter\n";
     }
 
     void print_registers(std::ostream & out) const
@@ -425,8 +673,9 @@ private:
 
     void run_program(std::ostream & out)
     {
-        // - start PC at TEXT_BASE
-        // - run until PC reaches text_cursor or some safety limit.
+        // Rebuild machine state from stored program history,
+        // then run from TEXT_BASE to current text_cursor.
+        rebuild_from_program();
         machine.cpu.pc = TEXT_BASE;
 
         const uint32_t max_steps = 1000000; // safety cap to avoid infinite loops
@@ -442,7 +691,8 @@ private:
 
             if (steps >= max_steps)
             {
-                out << "run: stopped after " << steps << " steps (possible infinite loop)\n";
+                out << "run: stopped after " << steps
+                    << " steps (possible infinite loop)\n";
             }
         }
         catch (const std::exception & e)
@@ -451,17 +701,13 @@ private:
         }
     }
 
-    //==========================================================
+    //----------------------------------------------------------
     // Assembly helpers
-    //==========================================================
+    //----------------------------------------------------------
     void assemble_text_line(const std::string & line)
     {
-        // need to put toks object in lexer
-        // instead of recreating vector everytime
-        // (do I even need token vector?)
         std::vector< Token > toks;
         lexer.lex_core(toks, line, line_number);
-        // if (print_toks): // mode set in interpreter to show extra print out
         println_toks_detail(toks, line);
 
         uint32_t line_pc = machine.text_cursor;
@@ -482,7 +728,6 @@ private:
         uint32_t line_pc = machine.data_cursor;
         parser.assemble_data_line(toks, line, line_pc);
     }
-        
 };
 
 #endif // INTERPRETER_H

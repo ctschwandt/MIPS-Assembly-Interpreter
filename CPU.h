@@ -802,6 +802,44 @@ public:
             }
 
             //==================================================
+            // REGIMM branches: bltz, bgez, ...
+            //==================================================
+            case OP_REGIMM:
+            {
+                uint8_t rs  = (word >> 21) & mask_bits(5);
+                uint8_t rt  = (word >> 16) & mask_bits(5);
+                uint32_t imm = word & mask_bits(16);
+
+                // sign-extend immediate, then shift left 2 for word offset
+                int32_t  simm   = static_cast<int16_t>(imm);
+                uint32_t offset = static_cast<uint32_t>(simm) << 2;
+
+                int32_t v = regs.readS(rs);   // signed comparison
+
+                switch (rt)
+                {
+                    case RT_BLTZ: // bltz rs, label  (branch if v < 0)
+                        if (v < 0)
+                        {
+                            // pc currently points to the *next* instruction
+                            pc = pc + offset;
+                        }
+                        break;
+
+                    case RT_BGEZ: // bgez rs, label  (branch if v >= 0)
+                        if (v >= 0)
+                        {
+                            pc = pc + offset;
+                        }
+                        break;
+
+                    default:
+                        throw std::runtime_error("Unknown OP_REGIMM rt code");
+                }
+                break;
+            }
+
+            //==================================================
             // Jumps (J-format)
             //==================================================
             case OP_J: // j label

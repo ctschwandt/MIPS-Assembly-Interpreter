@@ -99,6 +99,53 @@ public:
         if (n == 0)
             throw std::runtime_error("Empty integer token");
 
+        //==========================================================
+        // Char literal case: 'x' or '\n' etc., tokenized as INT
+        //==========================================================
+        if (n >= 3 && text.front() == '\'' && text.back() == '\'')
+        {
+            // strip outer quotes
+            std::string body = text.substr(1, n - 2);
+            char c = 0;
+
+            if (body.empty())
+            {
+                throw std::runtime_error("Empty char literal: " + text);
+            }
+            else if (body[0] != '\\')
+            {
+                // simple char like '+', 'A'
+                if (body.size() != 1)
+                    throw std::runtime_error("Invalid char literal: " + text);
+                c = body[0];
+            }
+            else
+            {
+                // escape sequence: '\n', '\t', '\\', '\'', '\r', '\0'
+                if (body.size() != 2)
+                    throw std::runtime_error("Invalid escape in char literal: " + text);
+
+                char e = body[1];
+                switch (e)
+                {
+                    case 'n':  c = '\n'; break;
+                    case 't':  c = '\t'; break;
+                    case 'r':  c = '\r'; break;
+                    case '\\': c = '\\'; break;
+                    case '\'': c = '\''; break;
+                    case '0':  c = '\0'; break;
+                    default:
+                        throw std::runtime_error(std::string("Unknown char escape: \\") + e);
+                }
+            }
+
+            // Return ASCII value as integer (0..255)
+            return static_cast<uint8_t>(c);
+        }
+
+        //==========================================================
+        // Existing numeric literal handling (dec/hex/oct, optional -)
+        //==========================================================
         std::size_t i = 0;
         bool negative = false;
 
@@ -164,7 +211,7 @@ public:
             else // base 10
             {
                 if (!is_num(c))
-                    throw std::runtime_error("Invalid decimal digit in: " + text);
+                    throw std::runtime_error("Invalid decimal digit in: " + text + " in " + line);
 
                 digit = c - '0'; // '0'..'9'
             }
@@ -173,7 +220,7 @@ public:
         }
 
         int64_t signed_val = negative ? -static_cast<int64_t>(value)
-                                      : static_cast<int64_t>(value);
+            : static_cast<int64_t>(value);
         return signed_val;
     }
 
@@ -375,21 +422,41 @@ public:
 
                 std::string label = toks[j++].get_string(line);
 
-                if (!machine.has_label(label))
-                    throw std::runtime_error("Label not defined yet for la: " + label);
+                // PC where the first expanded instruction (lui) will live
+                uint32_t instr_pc =
+                    current_pc + 4u * static_cast<uint32_t>(words.size());
 
-                uint32_t addr = machine.lookup_label(label);
+                uint32_t addr = 0;
+                bool have_addr = false;
+
+                if (machine.has_label(label))
+                {
+                    // Label already known – same behavior as before.
+                    addr = machine.lookup_label(label);
+                    have_addr = true;
+                }
+                else
+                {
+                    // Label not yet defined; register a fixup and let the
+                    // "pause until label is resolved" mechanism handle it,
+                    // exactly like you do for beq.
+                    machine.add_la_fixup(instr_pc, rt, label);
+                    // addr stays 0 here; we’ll patch the words later.
+                }
 
                 uint16_t hi = static_cast<uint16_t>((addr >> 16) & 0xFFFFu);
                 uint16_t lo = static_cast<uint16_t>(addr & 0xFFFFu);
+
+                // Emit placeholder (or final) instructions. If addr isn't known
+                // yet, hi/lo = 0 for now; Machine will overwrite them at fixup time.
 
                 // lui $at, hi
                 {
                     uint32_t op = static_cast<uint32_t>(OP_LUI);
                     uint32_t word =
-                        (op    << 26) |
-                        (ZERO  << 21) |
-                        (AT    << 16) |
+                        (op   << 26) |
+                        (ZERO << 21) |
+                        (AT   << 16) |
                         hi;
                     words.push_back(word);
                 }
@@ -398,9 +465,9 @@ public:
                 {
                     uint32_t op = static_cast<uint32_t>(OP_ORI);
                     uint32_t word =
-                        (op    << 26) |
-                        (AT    << 21) |
-                        (rt    << 16) |
+                        (op   << 26) |
+                        (AT   << 21) |
+                        (rt   << 16) |
                         lo;
                     words.push_back(word);
                 }
@@ -732,6 +799,57 @@ public:
             }
 
             //--------------------------------------------------
+            // mul rd, rs, rt
+            //
+            // SPIM-style pseudo:
+            //   mult rs, rt
+            //   mflo rd
+            //--------------------------------------------------
+            case MUL:
+            {
+                int j = mnem_index + 1;
+                uint32_t rd = parse_register(toks[j++], line);
+                ++j; // COMMA
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // COMMA
+                uint32_t rt = parse_register(toks[j++], line);
+
+                // 1) mult rs, rt
+                {
+                    uint32_t op    = static_cast<uint32_t>(OP_RTYPE);
+                    uint32_t funct = static_cast<uint32_t>(FUNCT_MULT);
+
+                    uint32_t word =
+                        (op    << 26) |
+                        (rs    << 21) |   // rs
+                        (rt    << 16) |   // rt
+                        (0u    << 11) |   // rd unused for mult
+                        (0u    <<  6) |
+                        (funct <<  0);
+
+                    words.push_back(word);
+                }
+
+                // 2) mflo rd
+                {
+                    uint32_t op    = static_cast<uint32_t>(OP_RTYPE);
+                    uint32_t funct = static_cast<uint32_t>(FUNCT_MFLO);
+
+                    uint32_t word =
+                        (op    << 26) |
+                        (0u    << 21) |   // rs = 0
+                        (0u    << 16) |   // rt = 0
+                        (rd    << 11) |   // rd gets LO
+                        (0u    <<  6) |
+                        (funct <<  0);
+
+                    words.push_back(word);
+                }
+
+                break;
+            }
+
+            //--------------------------------------------------
             // sgt rd, rs, rt   == slt rd, rt, rs
             //--------------------------------------------------
             case SGT:
@@ -892,24 +1010,38 @@ public:
 
         int i = 0;
 
-        // LABEL:
+        // ------------------------------------------------------
+        // Optional LABEL: label:
+        // ------------------------------------------------------
+        bool has_label = false;
+        std::string label_name;
+
         if (toks[i].type == IDENTIFIER &&
-            i + 1 < toks.size() &&
+            i + 1 < static_cast<int>(toks.size()) &&
             toks[i+1].type == COLON)
         {
-            // defines labels when rest of line is garbage
-            // (is that ok?)
-            std::string label = toks[i].get_string(line);
-            machine.define_label(label, current_pc);
-            i += 2;
+            // remember the label and define it later iff the
+            // line is otherwise valid.
+            label_name = toks[i].get_string(line);
+            has_label  = true;
+            i += 2; // skip "LABEL :"
         }
 
-        // empty line case should just be ignored in interpreter
-        if (toks[i].type == EOL)
-            return words; // empty or label-only line
+        // empty or label-only line: "loop:" then EOL
+        if (i < static_cast<int>(toks.size()) &&
+            toks[i].type == EOL)
+        {
+            if (has_label)
+            {
+                // label-only line is valid, define it now
+                machine.define_label(label_name, current_pc);
+            }
+            return words; // no instructions on this line
+        }
 
         // instruction mnemonic must be IDENTIFIER here
-        if (toks[i].type != IDENTIFIER)
+        if (i >= static_cast<int>(toks.size()) ||
+            toks[i].type != IDENTIFIER)
         {
             throw std::runtime_error("Expected instruction mnemonic at start of line");
         }
@@ -923,7 +1055,15 @@ public:
         if (is_pseudo(mnemonic))
         {
             // expand into 1 or more real instructions and return
+            // If expand_pseudo throws, we never define the label.
             expand_pseudo(toks, i, line, current_pc, words);
+
+            if (has_label)
+            {
+                // label refers to the first real instruction emitted
+                machine.define_label(label_name, current_pc);
+            }
+
             return words;
         }
 
@@ -940,9 +1080,9 @@ public:
         // the -1 is because checking the EOL is pointless
         for (std::size_t k = 0; k < pattern.size() - 1; ++k, ++j)
         {
-            if (j >= (int)toks.size() || toks[j].type != pattern[k])
+            if (j >= static_cast<int>(toks.size()) || toks[j].type != pattern[k])
             {
-                throw std::runtime_error("Unknown assembly pattern");
+                throw std::runtime_error("Unknown assembly pattern: " + line);
             }
         }
 
@@ -986,12 +1126,12 @@ public:
                 uint32_t op    = static_cast<uint32_t>(info.opcode);
                 uint32_t funct = static_cast<uint32_t>(info.funct);
 
-                word = (op           << 26) |
-                    (0u           << 21) |  // rs = 0 for shifts
-                    (rt           << 16) |
-                    (rd           << 11) |
-                    ((uint32_t)shamt <<  6) |
-                    (funct        <<  0);
+                word = (op              << 26) |
+                    (0u              << 21) |  // rs = 0 for shifts
+                    (rt              << 16) |
+                    (rd              << 11) |
+                    (static_cast<uint32_t>(shamt) <<  6) |
+                    (funct           <<  0);
                 words.push_back(word);
                 break;
             }
@@ -1005,7 +1145,7 @@ public:
 
                 int16_t imm16;
                 if (info.opcode == OP_ANDI || info.opcode == OP_ORI)
-                    imm16 = (int16_t)parse_imm16_unsigned(toks[j++], line);
+                    imm16 = static_cast<int16_t>(parse_imm16_unsigned(toks[j++], line));
                 else
                     imm16 = parse_imm16_signed(toks[j++], line);
 
@@ -1014,7 +1154,7 @@ public:
                 word = (op           << 26) |
                     (rs           << 21) |
                     (rt           << 16) |
-                    ((uint16_t)imm16);
+                    (static_cast<uint16_t>(imm16));
                 words.push_back(word);
                 break;
             }
@@ -1031,11 +1171,11 @@ public:
                 ++j; // RPAREN
 
                 uint32_t op = static_cast<uint32_t>(info.opcode);
-        
+
                 word = (op           << 26) |
                     (rs           << 21) |
                     (rt           << 16) |
-                    ((uint16_t)offset);
+                    (static_cast<uint16_t>(offset));
                 words.push_back(word);
                 break;
             }
@@ -1101,7 +1241,77 @@ public:
 
                 break;
             }
-          
+
+            case I_BRANCH1: // rs, label  (bgtz, blez, bltz, bgez)
+            {
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // COMMA
+
+                if (toks[j].type != IDENTIFIER)
+                    throw std::runtime_error("Expected label identifier in branch");
+
+                std::string label = toks[j++].get_string(line);
+
+                uint32_t op = static_cast<uint32_t>(info.opcode);
+                uint32_t rt = 0;
+
+                if (info.opcode == OP_REGIMM)
+                {
+                    // For bltz/bgez, we stored RT_BLTZ/RT_BGEZ in info.funct
+                    rt = static_cast<uint32_t>(info.funct);
+                }
+                else
+                {
+                    // bgtz/blez encode with rt = 0
+                    rt = 0;
+                }
+
+                uint32_t instr_pc =
+                    current_pc + 4u * static_cast<uint32_t>(words.size());
+
+                uint16_t imm = 0;
+
+                if (machine.has_label(label))
+                {
+                    uint32_t target_addr = machine.lookup_label(label);
+
+                    int32_t diff = static_cast<int32_t>(target_addr)
+                        - static_cast<int32_t>(instr_pc + 4);
+
+                    if (diff & 0x3)
+                        throw std::runtime_error("Branch target not word-aligned");
+
+                    int32_t offset = diff >> 2;
+
+                    if (offset < std::numeric_limits<int16_t>::min() ||
+                        offset > std::numeric_limits<int16_t>::max())
+                    {
+                        throw std::runtime_error("Branch offset out of 16-bit range");
+                    }
+
+                    imm = static_cast<uint16_t>(offset & 0xFFFF);
+                }
+
+                uint32_t word =
+                    (op << 26) |
+                    (rs << 21) |
+                    (rt << 16) |
+                    imm;
+
+                words.push_back(word);
+
+                if (!machine.has_label(label))
+                {
+                    machine.add_branch_fixup(instr_pc,
+                                             info.opcode,
+                                             rs,
+                                             rt,
+                                             label);
+                }
+
+                break;
+            }
+
             case JUMP: // label
             {
                 if (toks[j].type != IDENTIFIER)
@@ -1182,9 +1392,79 @@ public:
                 words.push_back(word);
                 break;
             }
-        
+
+            case R_HILO1: // one register: mfhi, mflo, mthi, mtlo
+            {
+                // Pattern: REGISTER, EOL
+                uint32_t r = parse_register(toks[j++], line);
+
+                uint32_t op    = static_cast<uint32_t>(info.opcode); // OP_RTYPE
+                uint32_t funct = static_cast<uint32_t>(info.funct);
+
+                uint32_t rs = 0u;
+                uint32_t rt = 0u;
+                uint32_t rd = 0u;
+
+                // mfhi/mflo use rd
+                if (funct == static_cast<uint32_t>(FUNCT_MFHI) ||
+                    funct == static_cast<uint32_t>(FUNCT_MFLO))
+                {
+                    rd = r;
+                }
+                // mthi/mtlo use rs
+                else if (funct == static_cast<uint32_t>(FUNCT_MTHI) ||
+                         funct == static_cast<uint32_t>(FUNCT_MTLO))
+                {
+                    rs = r;
+                }
+                else
+                {
+                    throw std::runtime_error("R_HILO1 with unexpected funct");
+                }
+
+                uint32_t word =
+                    (op    << 26) |
+                    (rs    << 21) |
+                    (rt    << 16) |
+                    (rd    << 11) |
+                    (0u    <<  6) |
+                    (funct <<  0);
+
+                words.push_back(word);
+                break;
+            }
+
+            case R_HILO2: // rs, rt   (mult, multu, div, divu)
+            {
+                uint32_t rs = parse_register(toks[j++], line);
+                ++j; // COMMA
+                uint32_t rt = parse_register(toks[j++], line);
+
+                uint32_t op    = static_cast<uint32_t>(info.opcode); // OP_RTYPE
+                uint32_t funct = static_cast<uint32_t>(info.funct);
+
+                uint32_t word =
+                    (op    << 26) |
+                    (rs    << 21) |
+                    (rt    << 16) |
+                    (0u    << 11) |  // rd = 0
+                    (0u    <<  6) |
+                    (funct <<  0);
+
+                words.push_back(word);
+                break;
+            }
+
             default:
                 throw std::runtime_error("Unknown instruction pattern");
+        }
+
+        // ------------------------------------------------------
+        // Only define label if line assembled successfully
+        // ------------------------------------------------------
+        if (has_label)
+        {
+            machine.define_label(label_name, current_pc);
         }
 
         return words;
@@ -1203,18 +1483,29 @@ public:
         // --------------------------------------------------------
         // Optional LABEL: label:
         // --------------------------------------------------------
+        bool has_label = false;
+        std::string label_name;
+
         if (toks[i].type == IDENTIFIER &&
             i + 1 < static_cast<int>(toks.size()) &&
             toks[i+1].type == COLON)
         {
-            std::string label = toks[i].get_string(line);
-            machine.define_label(label, current_pc);
+            label_name = toks[i].get_string(line);
+            has_label  = true;
             i += 2;
         }
 
         // label-only or empty line
-        if (i >= static_cast<int>(toks.size()) || toks[i].type == EOL)
+        if (i >= static_cast<int>(toks.size()) ||
+            toks[i].type == EOL)
+        {
+            if (has_label)
+            {
+                // label-only data line: define symbol at current_pc
+                machine.define_label(label_name, current_pc);
+            }
             return;
+        }
 
         // Next token must be directive identifier
         if (toks[i].type != IDENTIFIER)
@@ -1264,6 +1555,13 @@ public:
             while (i < static_cast<int>(toks.size()) &&
                    toks[i].type != EOL)
             {
+                // allow optional commas between operands
+                if (toks[i].type == COMMA)
+                {
+                    ++i;
+                    continue;
+                }
+
                 if (toks[i].type != INT)
                     error_here(".byte expects integer operands");
 
@@ -1279,6 +1577,7 @@ public:
             for (uint8_t b : bytes)
                 machine.emit_data_byte(b);
         }
+
         // --------------------------------------------------------
         // .half h1 h2 h3 ...
         // --------------------------------------------------------
@@ -1428,8 +1727,16 @@ public:
         {
             error_here("Unknown data directive: " + dir);
         }
-    }
 
+        // --------------------------------------------------------
+        // Only define label if data directive parsed successfully
+        // --------------------------------------------------------
+        if (has_label)
+        {
+            machine.define_label(label_name, current_pc);
+        }
+    }
+   
 private:
     Machine & machine;
 };

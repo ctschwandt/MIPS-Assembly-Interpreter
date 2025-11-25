@@ -92,6 +92,12 @@ enum Funct : uint8_t
     FUNCT_SLTU  = 0x2B         // 101011b
 };
 
+enum RegimmCode : uint8_t
+{
+    RT_BLTZ = 0x00,
+    RT_BGEZ = 0x01,
+};
+
 //==============================================================
 // Instruction metadata
 //==============================================================
@@ -102,9 +108,12 @@ enum InstrType
     I_ARITH,   // I-format: rt, rs, imm       (addi, andi, ori, slti, ...)
     I_LS,      // I-format: rt, offset(rs)    (lw, sw, lb, sb, ...)
     I_BRANCH,  // I-format: rs, rt, label     (beq, bne)
+    I_BRANCH1, // I-format: rs, label         (bgtz, blez, bltz, bgez)
     JUMP,      // J-format: label             (j, jal)
     SYSCALL,   // R-format: syscall
     JR_JALR,   // R3: jr rs, jalr rs
+    R_HILO1,   // rd     (mfhi, mflo)
+    R_HILO2,   // rs, rt (mult, multu, div, divu)
     NUM_INSTRTYPE, 
 };
 
@@ -122,6 +131,8 @@ enum PseudoType
     NEG,    // neg   rd, rs
     NEGU,   // negu  rd, rs
     NOT,    // not   rd, rs
+    MUL,    // mul   rd, rs, rt
+    DIV3,    // div   rd, rs, rt
 
     // Set-on-compare pseudos
     SGE,    // sge   rd, rs, rt
@@ -157,14 +168,23 @@ static const std::vector< TokenType > PATTERNS[NUM_INSTRTYPE] = {
     // I_BRANCH: rs, rt, label e.g. beq $t0, $t1, LOOP
     std::vector<TokenType>{ REGISTER, COMMA, REGISTER, COMMA, IDENTIFIER, EOL },
 
+    // I_BRANCH1: rs, label
+    std::vector<TokenType>{ REGISTER, COMMA, IDENTIFIER, EOL },
+
     // JUMP: label             e.g. j LOOP
     std::vector<TokenType>{ IDENTIFIER, EOL },
 
     // SYSCALL: syscall
     std::vector< TokenType > { EOL },
 
-    // JR_JALR:
-    std::vector< TokenType > { REGISTER, EOL }
+    // JR_JALR: jr $ra
+    std::vector< TokenType > { REGISTER, EOL },
+
+    // R_HILO1: rd
+    std::vector< TokenType > { REGISTER, EOL },
+
+    // R_HILO2: rs, rt
+    std::vector< TokenType > { REGISTER, COMMA, REGISTER, EOL },
 };
 
 const std::unordered_map<std::string, uint8_t> REG_TABLE = {
@@ -264,16 +284,16 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     { "seq",   { R3,      OP_RTYPE, FUNCT_SEQ   } }, // pseudo-ish set-equal
 
     // Multiply / divide to hi/lo
-    { "mult",  { R3,      OP_RTYPE, FUNCT_MULT  } },
-    { "multu", { R3,      OP_RTYPE, FUNCT_MULTU } },
-    { "div",   { R3,      OP_RTYPE, FUNCT_DIV   } },
-    { "divu",  { R3,      OP_RTYPE, FUNCT_DIVU  } },
+    { "mult",  { R_HILO2, OP_RTYPE, FUNCT_MULT  } },
+    { "multu", { R_HILO2, OP_RTYPE, FUNCT_MULTU } },
+    { "div",   { R_HILO2, OP_RTYPE, FUNCT_DIV   } },
+    { "divu",  { R_HILO2, OP_RTYPE, FUNCT_DIVU  } },
 
     // Moves to/from hi/lo (one register operand)
-    { "mfhi",  { R3,      OP_RTYPE, FUNCT_MFHI  } },
-    { "mflo",  { R3,      OP_RTYPE, FUNCT_MFLO  } },
-    { "mthi",  { R3,      OP_RTYPE, FUNCT_MTHI  } },
-    { "mtlo",  { R3,      OP_RTYPE, FUNCT_MTLO  } },
+    { "mfhi",  { R_HILO1,      OP_RTYPE, FUNCT_MFHI  } },
+    { "mflo",  { R_HILO1,      OP_RTYPE, FUNCT_MFLO  } },
+    { "mthi",  { R_HILO1,      OP_RTYPE, FUNCT_MTHI  } },
+    { "mtlo",  { R_HILO1,      OP_RTYPE, FUNCT_MTLO  } },
 
     //==========================================================
     // R-type shifts with shamt: rd, rt, shamt   (RSHIFT)
@@ -287,7 +307,7 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     { "srlv",  { R3,      OP_RTYPE, FUNCT_SRLV  } },
     { "srav",  { R3,      OP_RTYPE, FUNCT_SRAV  } },
 
-     //==========================================================
+    //==========================================================
     // Specials: SYSCALL, JR_JALR
     //==========================================================
     { "jr",     { JR_JALR,    OP_RTYPE,     FUNCT_JR  } },
@@ -323,10 +343,17 @@ inline const std::unordered_map<std::string, InstrInfo> INSTR_TABLE = {
     //   - two-register: rs, rt, label          (I_BRANCH)
     //   - one-register: rs, label              (still I_BRANCH for now)
     //==========================================================
+    // two reg
     { "beq",   { I_BRANCH,OP_BEQ,   FUNCT_NONE  } },
     { "bne",   { I_BRANCH,OP_BNE,   FUNCT_NONE  } },
-    { "bgtz",  { I_BRANCH,OP_BGTZ,  FUNCT_NONE  } },   // rs, label
-    { "blez",  { I_BRANCH,OP_BLEZ,  FUNCT_NONE  } },   // rs, label
+
+    // one-reg, normal opcodes
+    { "bgtz",  { I_BRANCH1,OP_BGTZ,  FUNCT_NONE  } },   // rs, label
+    { "blez",  { I_BRANCH1,OP_BLEZ,  FUNCT_NONE  } },   // rs, label
+
+    // one-reg, REGIMM (opcode = OP_REGIMM, rt = subopcode)
+    { "bltz",  { I_BRANCH1, OP_REGIMM, static_cast<Funct>(RT_BLTZ) } },
+    { "bgez",  { I_BRANCH1, OP_REGIMM, static_cast<Funct>(RT_BGEZ) } },
 
     //==========================================================
     // Jumps (J-format): label                  (JUMP)
@@ -340,6 +367,7 @@ inline const std::unordered_map<std::string, PseudoType> PSEUDO_TABLE = {
     { "neg",  NEG  },
     { "negu", NEGU },
     { "not",  NOT  },
+    { "mul",  MUL  },
 
     { "sge",  SGE  },
     { "sgt",  SGT  },
