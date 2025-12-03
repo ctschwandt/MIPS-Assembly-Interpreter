@@ -351,9 +351,8 @@ public:
             default:
                 break;
         }
-
         
-    push_tok(EOL, n, n, 0);
+        push_tok(EOL, n, n, 0);
     }
     
 private:
