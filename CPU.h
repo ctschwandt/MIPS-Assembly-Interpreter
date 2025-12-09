@@ -42,6 +42,8 @@ public:
 
     void execute(uint32_t word)
     {
+        static int count = 0;
+        //std::cout << count++ << ": " << "executing " << word << std::endl;
         uint8_t opcode = (word >> 26) & mask_bits(6);
 
         switch (opcode)
@@ -75,21 +77,22 @@ public:
                         break;
                     }
 
-                    case FUNCT_ADDU:
+                     case FUNCT_ADDU:
                     {
                         uint64_t a = regs.readU(rs);
                         uint64_t b = regs.readU(rt);
                         uint64_t t = a + b;
 
-                        if (t < std::numeric_limits<uint32_t>::min() ||
-                            t > std::numeric_limits<uint32_t>::max())
-                        {
-                            throw std::runtime_error("MIPS integer overflow on addu");
-                        }
+                        // if (t < std::numeric_limits<uint32_t>::min() ||
+                        //     t > std::numeric_limits<uint32_t>::max())
+                        // {
+                        //     throw std::runtime_error("MIPS integer overflow on addu");
+                        // }
                         regs.writeU(rd, static_cast<uint32_t>(t));
                         break;
                     }
 
+                   
                     case FUNCT_SUB:
                     {
                         int64_t a = static_cast<int64_t>(regs.readS(rs));
@@ -354,7 +357,6 @@ public:
                             //--------------------------------------
                             case 1:
                             {
-                                std::cout << "executing sys1" << std::endl;
                                 int32_t value = regs.readS(4); // $a0
                                 std::cout << value;
                                 break;

@@ -17,16 +17,13 @@
 
 int main()
 {
-    // test_lex_core();
-    // test_parser();
-
     Interpreter interpreter;
     try
     {
         Interpreter interpreter;
         interpreter.repl(std::cin, std::cout);
     }
-    catch (const std::exception& e)
+    catch (const std::exception & e)
     {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;

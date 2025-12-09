@@ -23,21 +23,6 @@
 #include "Parser.h"
 
 /*
-  todo:
-  - bug fixing on tic-tac-toe within sim:
-Enter row: CONSOLE INTEGER INPUT> 0
-Enter col: CONSOLE INTEGER INPUT> 0
-+-+-+-+
-|X| | |
-+-+-+-+
-| |O| |
-+-+-+-+
-| | | |
-+-+-+-+
-Runtime error: MIPS integer overflow on addu
-
-
-  
   Features to support (Dr. Liow list):
   - The user can enter SPIM instruction and data at the prompt.
   - The user can load a SPIM program.
@@ -683,17 +668,24 @@ private:
 
         try
         {
-            while (machine.cpu.pc < machine.text_cursor && steps < max_steps)
+            while (!machine.cpu.halted &&            // <-- new
+                   machine.cpu.pc < machine.text_cursor &&
+                   steps < max_steps)
             {
                 machine.cpu.step();
                 ++steps;
             }
 
-            if (steps >= max_steps)
+            if (machine.cpu.halted)
+            {
+                out << "Program halted after " << steps << " steps.\n";
+            }
+            else if (steps >= max_steps)
             {
                 out << "run: stopped after " << steps
                     << " steps (possible infinite loop)\n";
             }
+            // else: pc ran past text_cursor without halt; that’s effectively “fell off”
         }
         catch (const std::exception & e)
         {
