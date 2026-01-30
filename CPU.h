@@ -169,7 +169,7 @@ public:
                         break;
                     }
 
-                    // seq: set equal (non-standard, but you have a funct for it)
+                    // seq: set equal
                     case FUNCT_SEQ:
                     {
                         uint32_t a = regs.readU(rs);
