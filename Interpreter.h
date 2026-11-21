@@ -277,6 +277,12 @@ public:
         std::cout << "exiting..." << std::endl;
     }
 
+    void run_file(const std::string& filename, std::ostream& out)
+    {
+        load_file(filename);
+        run_program(out);
+    }
+
     // load a file and assemble it (non-interactive loader)
     void load_file(const std::string & path)
     {

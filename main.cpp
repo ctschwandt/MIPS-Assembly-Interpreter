@@ -15,19 +15,26 @@
 //#include "Executor.h"
 #include "Interpreter.h"
 
-int main()
+int main(int argc, char* argv[])
 {
-    Interpreter interpreter;
     try
     {
         Interpreter interpreter;
-        interpreter.repl(std::cin, std::cout);
+
+        if (argc > 1)
+        {
+            interpreter.run_file(argv[1], std::cout);
+        }
+        else
+        {
+            interpreter.repl(std::cin, std::cout);
+        }
     }
-    catch (const std::exception & e)
+    catch (const std::exception& e)
     {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;
     }
-    
+
     return 0;
 }
